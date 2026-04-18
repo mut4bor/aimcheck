@@ -1,4 +1,4 @@
-import { Point, MousePath, RoundResult } from '@/types'
+import { Point, RoundResult } from '@/types'
 import { BASE_GAME_CONFIG } from '@/constants'
 
 export const getDistance = (p1: Point, p2: Point): number => {
@@ -35,6 +35,7 @@ export const calculateAccuracyScore = (
 
   const start = { x: centerX, y: centerY }
   const end = targetPosition
+  const idealLength = getDistance(start, end)
 
   let totalDeviation = 0
   const pathLength = path.length
@@ -51,7 +52,8 @@ export const calculateAccuracyScore = (
   }
 
   const averageDeviation = totalDeviation / pathLength
-  const maxDeviation = 50
+  const maxDeviation =
+    idealLength * BASE_GAME_CONFIG.MAX_ACCURACY_DEVIATION_RATIO
   const normalizedDeviation = Math.min(1, averageDeviation / maxDeviation)
   const score =
     BASE_GAME_CONFIG.MAX_SCORE_PER_CATEGORY * (1 - normalizedDeviation)
@@ -64,7 +66,8 @@ export const calculateDistanceFromCenter = (
   targetPosition: Point,
 ): number => {
   const distance = getDistance(finalPosition, targetPosition)
-  const maxDistance = BASE_GAME_CONFIG.TARGET_SIZE
+  const maxDistance =
+    BASE_GAME_CONFIG.TARGET_SIZE * BASE_GAME_CONFIG.MAX_HIT_DISTANCE_RATIO
 
   if (distance <= maxDistance) {
     return (
@@ -76,10 +79,11 @@ export const calculateDistanceFromCenter = (
 }
 
 export const calculateTimeScore = (actualTimeMs: number): number => {
-  const idealTimeMs = 100
-  const maxTimeDeviation = 1000
-  const deviation = Math.abs(actualTimeMs - idealTimeMs)
-  const normalizedDeviation = Math.min(1, deviation / maxTimeDeviation)
+  const deviation = Math.abs(actualTimeMs - BASE_GAME_CONFIG.IDEAL_TIME_MS)
+  const normalizedDeviation = Math.min(
+    1,
+    deviation / BASE_GAME_CONFIG.MAX_TIME_DEVIATION_MS,
+  )
   const score =
     BASE_GAME_CONFIG.MAX_SCORE_PER_CATEGORY * (1 - normalizedDeviation)
 

@@ -9,8 +9,8 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    # ports:
-    #   - '5432:5432'
+    ports:
+      - '5437:5432'
 
   server:
     image: 172.16.0.100:8011/aim-trainer-server
@@ -25,6 +25,10 @@ services:
       - DB_USERNAME
       - DB_PASSWORD
       - DB_DATABASE
+      - BETTER_AUTH_SECRET
+      - BETTER_AUTH_URL
+      - CLIENT_URL
+      - NODE_ENV
     depends_on:
       - postgres
 

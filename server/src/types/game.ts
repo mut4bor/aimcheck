@@ -1,19 +1,12 @@
 export interface Round {
-  accuracy_score: number // 0-100
-  distance_from_center: number // 0-100 (100 = точное попадание в центр, 0 = максимальное отклонение)
+  accuracy_score: number
+  distance_from_center: number
   time: {
-    value_ms: number // время в миллисекундах
-    score: number // 0-100
+    value_ms: number
+    score: number
   }
 }
 
 export interface GameResultRequest {
-  nickname: string
-  rounds: Round[] // ровно 3 раунда
-}
-
-export interface Player {
-  id: number
-  nickname: string
-  created_at: Date
+  rounds: Round[]
 }

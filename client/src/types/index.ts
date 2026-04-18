@@ -29,17 +29,24 @@ export interface Round {
 }
 
 export interface GameResultRequest {
-  nickname: string
   rounds: Round[] // ровно 3 раунда
 }
 
 export interface GameResultResponse {
   message: string
-  player: {
-    id: number
-    nickname: string
-  }
-  resultsCount: number
+  gameResultId: number
+  roundsCount: number
+}
+
+export interface UserGameResult {
+  game_id: number
+  created_at: string
+  avg_accuracy: string | number
+  avg_distance_from_center: string | number
+  avg_time_value_ms: string | number
+  avg_time_score: string | number
+  combined_score: string | number
+  rounds_count: string | number
 }
 
 export interface ApiError {

@@ -24,8 +24,6 @@ import {
 } from '@/utils'
 
 type UseGameEngineReturn = {
-  nickNameValue: string
-  setNickNameValue: (name: string) => void
   gameState: GameState
   currentRound: number
   targetPosition: Point
@@ -49,7 +47,6 @@ type UseGameEngineReturn = {
 export const useGameEngine = (
   submitResults: (data: GameResultRequest) => Promise<GameResultResponse>,
 ): UseGameEngineReturn => {
-  const [nickNameValue, setNickNameValue] = useState('')
   const [gameState, setGameState] = useState<GameState>('waiting')
   const [currentRound, setCurrentRound] = useState(0)
   const [targetPosition, setTargetPosition] = useState<Point>({ x: 0, y: 0 })
@@ -155,13 +152,10 @@ export const useGameEngine = (
 
   // старт игры
   const startGame = useCallback(() => {
-    if (!nickNameValue.trim()) {
-      return
-    }
     setGameState('preparing')
     setCurrentRound(0)
     setRoundResults([])
-  }, [nickNameValue])
+  }, [])
 
   // удержание курсора в центре → прогресс → старт/ресет
   useEffect(() => {
@@ -219,7 +213,6 @@ export const useGameEngine = (
   useEffect(() => {
     if (gameState === 'finished') {
       submitResults({
-        nickname: nickNameValue || 'No nickname',
         rounds: roundResults.map((result) => ({
           accuracy_score: result.accuracyScore,
           distance_from_center: result.distanceFromCenter,
@@ -230,12 +223,10 @@ export const useGameEngine = (
         })),
       })
     }
-  }, [gameState, roundResults, submitResults, nickNameValue])
+  }, [gameState, roundResults, submitResults])
 
   return {
     containerRef,
-    nickNameValue,
-    setNickNameValue,
     gameState,
     currentRound,
     targetPosition,
