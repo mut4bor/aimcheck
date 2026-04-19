@@ -3,6 +3,7 @@ import GameScreen from '@/components/GameScreen'
 import Login from '@/components/Login'
 import Register from '@/components/Register'
 import Profile from '@/components/Profile'
+import SessionDetail from '@/components/SessionDetail'
 import RequireAuth from '@/components/RequireAuth'
 
 const App = () => {
@@ -16,6 +17,14 @@ const App = () => {
           element={
             <RequireAuth>
               <Profile />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/profile/sessions/:id"
+          element={
+            <RequireAuth>
+              <SessionDetail />
             </RequireAuth>
           }
         />

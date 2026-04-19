@@ -83,24 +83,64 @@ const Profile = () => {
                 </tr>
               </thead>
               <tbody>
-                {sessions.map((s) => (
-                  <tr key={s.id} className="hover:bg-gray-50">
-                    <td className="px-3 py-2 border-b">{s.id}</td>
-                    <td className="px-3 py-2 border-b">
-                      {new Date(s.created_at).toLocaleString()}
-                    </td>
-                    <td className="px-3 py-2 border-b">{s.rounds_count}</td>
-                    <td className="px-3 py-2 border-b">{fmt(s.f_hit)}</td>
-                    <td className="px-3 py-2 border-b">{fmt(s.f_positioning)}</td>
-                    <td className="px-3 py-2 border-b">{fmt(s.f_reaction)}</td>
-                    <td className="px-3 py-2 border-b">{fmt(s.f_movement)}</td>
-                    <td className="px-3 py-2 border-b">{fmt(s.f_parasitic)}</td>
-                    <td className="px-3 py-2 border-b">{fmt(s.f_stability)}</td>
-                    <td className="px-3 py-2 border-b font-semibold">
-                      {fmt(s.integral_score)}
-                    </td>
-                  </tr>
-                ))}
+                {sessions.map((s) => {
+                  const to = `/profile/sessions/${s.id}`
+                  const cell = 'block px-3 py-2'
+                  return (
+                    <tr key={s.id} className="hover:bg-gray-50 [&>td]:border-b">
+                      <td className="text-blue-600 underline">
+                        <Link to={to} className={cell}>
+                          {s.id}
+                        </Link>
+                      </td>
+                      <td>
+                        <Link to={to} className={cell}>
+                          {new Date(s.created_at).toLocaleString()}
+                        </Link>
+                      </td>
+                      <td>
+                        <Link to={to} className={cell}>
+                          {s.rounds_count}
+                        </Link>
+                      </td>
+                      <td>
+                        <Link to={to} className={cell}>
+                          {fmt(s.f_hit)}
+                        </Link>
+                      </td>
+                      <td>
+                        <Link to={to} className={cell}>
+                          {fmt(s.f_positioning)}
+                        </Link>
+                      </td>
+                      <td>
+                        <Link to={to} className={cell}>
+                          {fmt(s.f_reaction)}
+                        </Link>
+                      </td>
+                      <td>
+                        <Link to={to} className={cell}>
+                          {fmt(s.f_movement)}
+                        </Link>
+                      </td>
+                      <td>
+                        <Link to={to} className={cell}>
+                          {fmt(s.f_parasitic)}
+                        </Link>
+                      </td>
+                      <td>
+                        <Link to={to} className={cell}>
+                          {fmt(s.f_stability)}
+                        </Link>
+                      </td>
+                      <td className="font-semibold">
+                        <Link to={to} className={cell}>
+                          {fmt(s.integral_score)}
+                        </Link>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

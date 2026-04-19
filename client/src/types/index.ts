@@ -83,6 +83,31 @@ export interface UserSessionSummary {
   integral_score: number
 }
 
+export interface SessionTrialRow {
+  round_number: number
+  rt_ms: number
+  hit_distance: number
+  hit_score: number
+  movement_delta_pct: number
+  movement_score: number
+  overshoots: number
+  undershoots: number
+  parasitic_score: number
+  positioning_rho_pct: number | null
+  positioning_score: number | null
+  loops_count: number
+  stability_score: number
+}
+
+export interface SessionDetailResponse {
+  session: UserSessionSummary & {
+    field_width: number
+    field_height: number
+    target_radius: number
+  }
+  trials: SessionTrialRow[]
+}
+
 export interface ApiError {
   error: string
   message?: string
