@@ -66,27 +66,67 @@ export async function runMigrations() {
       )
     `)
 
-    // game data tables (user-linked)
+    // drop legacy game tables
+    await client.query(`DROP TABLE IF EXISTS rounds CASCADE`)
+    await client.query(`DROP TABLE IF EXISTS game_results CASCADE`)
+    await client.query(`DROP TABLE IF EXISTS trials CASCADE`)
+    await client.query(`DROP TABLE IF EXISTS game_sessions CASCADE`)
+
     await client.query(`
-      CREATE TABLE IF NOT EXISTS game_results (
+      CREATE TABLE game_sessions (
         id SERIAL PRIMARY KEY,
         user_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        field_width INTEGER NOT NULL,
+        field_height INTEGER NOT NULL,
+        target_radius REAL NOT NULL,
+        rounds_count INTEGER NOT NULL,
+        f_hit REAL NOT NULL,
+        f_positioning REAL NOT NULL,
+        f_reaction REAL NOT NULL,
+        f_movement REAL NOT NULL,
+        f_parasitic REAL NOT NULL,
+        f_stability REAL NOT NULL,
+        integral_score REAL NOT NULL
       )
     `)
 
     await client.query(`
-      CREATE TABLE IF NOT EXISTS rounds (
+      CREATE TABLE trials (
         id SERIAL PRIMARY KEY,
-        game_result_id INTEGER REFERENCES game_results(id) ON DELETE CASCADE,
+        session_id INTEGER NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
         round_number INTEGER NOT NULL,
-        accuracy_score INTEGER NOT NULL CHECK (accuracy_score >= 0 AND accuracy_score <= 100),
-        distance_from_center INTEGER NOT NULL CHECK (distance_from_center >= 0 AND distance_from_center <= 100),
-        time_value_ms INTEGER NOT NULL CHECK (time_value_ms > 0),
-        time_score INTEGER NOT NULL CHECK (time_score >= 0 AND time_score <= 100),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        appeared_at_ms DOUBLE PRECISION NOT NULL,
+        clicked_at_ms DOUBLE PRECISION NOT NULL,
+        target_x REAL NOT NULL,
+        target_y REAL NOT NULL,
+        start_cursor_x REAL NOT NULL,
+        start_cursor_y REAL NOT NULL,
+        click_x REAL NOT NULL,
+        click_y REAL NOT NULL,
+        trajectory JSONB NOT NULL,
+        between_samples JSONB NOT NULL,
+        rt_ms REAL NOT NULL,
+        hit_distance REAL NOT NULL,
+        hit_score REAL NOT NULL,
+        movement_delta_pct REAL NOT NULL,
+        movement_score REAL NOT NULL,
+        overshoots INTEGER NOT NULL,
+        undershoots INTEGER NOT NULL,
+        parasitic_score REAL NOT NULL,
+        positioning_rho_pct REAL,
+        positioning_score REAL,
+        loops_count INTEGER NOT NULL,
+        stability_score REAL NOT NULL
       )
     `)
+
+    await client.query(
+      `CREATE INDEX idx_trials_session ON trials(session_id, round_number)`,
+    )
+    await client.query(
+      `CREATE INDEX idx_sessions_user ON game_sessions(user_id, created_at DESC)`,
+    )
 
     await client.query('COMMIT')
     console.log('Migrations completed successfully')

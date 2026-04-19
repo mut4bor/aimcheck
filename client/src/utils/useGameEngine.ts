@@ -9,18 +9,14 @@ import {
 import {
   GameState,
   Point,
-  RoundResult,
-  MousePath,
-  GameResultResponse,
-  GameResultRequest,
+  RawTrial,
+  RawSessionRequest,
+  SessionSubmitResponse,
+  SessionConfig,
 } from '@/types'
-import { BASE_GAME_CONFIG } from '@/constants'
 import {
   generateTargetPosition,
   checkInCenter,
-  calculateAccuracyScore,
-  calculateDistanceFromCenter,
-  calculateTimeScore,
 } from '@/utils'
 
 type UseGameEngineReturn = {
@@ -28,50 +24,55 @@ type UseGameEngineReturn = {
   currentRound: number
   targetPosition: Point
   mousePosition: Point
-  roundResults: RoundResult[]
   isInCenter: boolean
   holdProgress: number
   canvasSize: number
+  result: SessionSubmitResponse | null
   handleMouseMove: (e: MouseEvent<HTMLCanvasElement>) => void
-  handleMouseClick: () => void
+  handleMouseClick: (e: MouseEvent<HTMLCanvasElement>) => void
   containerRef: RefObject<HTMLDivElement | null>
 }
 
-/**
- * Хук управления всей логикой игры:
- * - трекает состояние (игра, подготовка, ожидание, завершение)
- * - управляет раундами
- * - считает метрики (точность, время, расстояние)
- * - при завершении отправляет результаты
- */
 export const useGameEngine = (
-  submitResults: (data: GameResultRequest) => Promise<GameResultResponse>,
+  config: SessionConfig,
+  submitResults: (data: RawSessionRequest) => Promise<SessionSubmitResponse>,
 ): UseGameEngineReturn => {
   const [gameState, setGameState] = useState<GameState>('waiting')
   const [currentRound, setCurrentRound] = useState(0)
   const [targetPosition, setTargetPosition] = useState<Point>({ x: 0, y: 0 })
   const [mousePosition, setMousePosition] = useState<Point>({ x: 0, y: 0 })
-  const [mousePath, setMousePath] = useState<MousePath>({
-    points: [],
-    startTime: 0,
-  })
-  const [roundResults, setRoundResults] = useState<RoundResult[]>([])
   const [isInCenter, setIsInCenter] = useState(false)
-  const containerRef = useRef<HTMLDivElement>(null)
   const [canvasSize, setCanvasSize] = useState(400)
   const [holdProgress, setHoldProgress] = useState(0)
+  const [result, setResult] = useState<SessionSubmitResponse | null>(null)
+
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  // raw capture buffers (refs to avoid re-renders per mousemove)
+  const trialsRef = useRef<RawTrial[]>([])
+  const trajectoryRef = useRef<{ x: number; y: number; t: number }[]>([])
+  const betweenRef = useRef<{ x: number; y: number; t: number }[]>([])
+  const trialMetaRef = useRef<{
+    appeared_at_ms: number
+    start_cursor_x: number
+    start_cursor_y: number
+    target_x: number
+    target_y: number
+  } | null>(null)
+  const gameStateRef = useRef<GameState>('waiting')
+  const submittedRef = useRef(false)
+
+  useEffect(() => {
+    gameStateRef.current = gameState
+  }, [gameState])
 
   const centerX = canvasSize / 2
   const centerY = canvasSize / 2
-  const CIRCLE_RADIUS = (canvasSize - BASE_GAME_CONFIG.TARGET_SIZE * 2) / 2 - 20
+  const CIRCLE_RADIUS = (canvasSize - config.targetRadius * 2) / 2 - 20
 
-  // обновление размера canvas при изменении окна
   useEffect(() => {
     const updateSize = () => {
-      if (!containerRef.current) {
-        return
-      }
-
+      if (!containerRef.current) return
       setCanvasSize(containerRef.current.clientHeight)
     }
     updateSize()
@@ -79,85 +80,101 @@ export const useGameEngine = (
     return () => window.removeEventListener('resize', updateSize)
   }, [])
 
-  // завершение раунда
-  const finishRound = useCallback(() => {
-    const endTime = Date.now()
-    const duration = endTime - mousePath.startTime
+  const finishRound = useCallback(
+    (clickX: number, clickY: number) => {
+      const meta = trialMetaRef.current
+      if (!meta) return
+      const clickedAt = performance.now()
 
-    const accuracyScore = Math.round(
-      calculateAccuracyScore(
-        mousePath.points,
-        targetPosition,
-        centerX,
-        centerY,
-      ),
-    )
-    const distanceFromCenter = Math.round(
-      calculateDistanceFromCenter(mousePosition, targetPosition),
-    )
-    const timeMs = Math.round(duration)
-    const timeScore = Math.round(calculateTimeScore(timeMs))
+      const trial: RawTrial = {
+        round_number: trialsRef.current.length + 1,
+        appeared_at_ms: meta.appeared_at_ms,
+        clicked_at_ms: clickedAt,
+        target_x: meta.target_x,
+        target_y: meta.target_y,
+        start_cursor_x: meta.start_cursor_x,
+        start_cursor_y: meta.start_cursor_y,
+        click_x: clickX,
+        click_y: clickY,
+        trajectory: trajectoryRef.current,
+        between_samples: [],
+      }
+      trialsRef.current.push(trial)
+      trajectoryRef.current = []
+      trialMetaRef.current = null
 
-    const result: RoundResult = {
-      accuracyScore,
-      distanceFromCenter,
-      time: { valueMs: timeMs, score: timeScore },
-    }
-
-    setRoundResults((prev) => [...prev, result])
-
-    if (currentRound + 1 >= BASE_GAME_CONFIG.ROUNDS_COUNT) {
-      setGameState('finished')
-    } else {
-      setCurrentRound((prev) => prev + 1)
-      setGameState('preparing')
-    }
-  }, [mousePath, mousePosition, targetPosition, currentRound, centerX, centerY])
-
-  // обработка движения мыши
-  const handleMouseMove = useCallback(
-    (e: MouseEvent<HTMLCanvasElement>) => {
-      const canvas = e.currentTarget
-      const rect = canvas.getBoundingClientRect()
-      const x = e.clientX - rect.left
-      const y = e.clientY - rect.top
-
-      setMousePosition({ x, y })
-      setIsInCenter(checkInCenter({ x, y }, centerX, centerY))
-
-      if (gameState === 'playing') {
-        setMousePath((prev) => ({
-          ...prev,
-          points: [...prev.points, { x, y }],
-        }))
+      if (trialsRef.current.length >= config.roundsCount) {
+        setGameState('finished')
+      } else {
+        setCurrentRound((r) => r + 1)
+        setGameState('preparing')
       }
     },
-    [gameState, centerX, centerY],
+    [config.roundsCount],
   )
 
-  // обработка клика мыши
-  const handleMouseClick = useCallback(() => {
-    if (gameState === 'playing') {
-      finishRound()
-    }
-  }, [gameState, finishRound])
+  const handleMouseMove = useCallback(
+    (e: MouseEvent<HTMLCanvasElement>) => {
+      const rect = e.currentTarget.getBoundingClientRect()
+      const x = e.clientX - rect.left
+      const y = e.clientY - rect.top
+      const t = performance.now()
 
-  // запуск нового раунда
+      setMousePosition({ x, y })
+      setIsInCenter(checkInCenter({ x, y }, centerX, centerY, config.centerTolerance))
+
+      const state = gameStateRef.current
+      if (state === 'playing') {
+        trajectoryRef.current.push({ x, y, t })
+      } else if (state === 'preparing' && trialsRef.current.length > 0) {
+        betweenRef.current.push({ x, y, t })
+      }
+    },
+    [centerX, centerY, config.centerTolerance],
+  )
+
+  const handleMouseClick = useCallback(
+    (e: MouseEvent<HTMLCanvasElement>) => {
+      if (gameStateRef.current !== 'playing') return
+      const rect = e.currentTarget.getBoundingClientRect()
+      finishRound(e.clientX - rect.left, e.clientY - rect.top)
+    },
+    [finishRound],
+  )
+
   const startNewRound = useCallback(() => {
+    // attach between_samples to previous trial
+    if (trialsRef.current.length > 0) {
+      trialsRef.current[trialsRef.current.length - 1].between_samples =
+        betweenRef.current
+    }
+    betweenRef.current = []
+
     const newTarget = generateTargetPosition(centerX, centerY, CIRCLE_RADIUS)
     setTargetPosition(newTarget)
-    setMousePath({ points: [], startTime: Date.now() })
+    trialMetaRef.current = {
+      appeared_at_ms: performance.now(),
+      start_cursor_x: mousePosition.x,
+      start_cursor_y: mousePosition.y,
+      target_x: newTarget.x,
+      target_y: newTarget.y,
+    }
+    trajectoryRef.current = []
     setGameState('playing')
-  }, [centerX, centerY, CIRCLE_RADIUS])
+  }, [centerX, centerY, CIRCLE_RADIUS, mousePosition.x, mousePosition.y])
 
-  // старт игры
   const startGame = useCallback(() => {
-    setGameState('preparing')
+    trialsRef.current = []
+    trajectoryRef.current = []
+    betweenRef.current = []
+    trialMetaRef.current = null
+    submittedRef.current = false
+    setResult(null)
     setCurrentRound(0)
-    setRoundResults([])
+    setGameState('preparing')
   }, [])
 
-  // удержание курсора в центре → прогресс → старт/ресет
+  // hold cursor in center → begin or restart
   useEffect(() => {
     let frame: number
     let startTime: number | null = null
@@ -165,24 +182,13 @@ export const useGameEngine = (
     function updateProgress(currentTime: number) {
       if (!startTime) startTime = currentTime
       const elapsed = currentTime - startTime
-      const progress = Math.min(
-        elapsed / (BASE_GAME_CONFIG.PREPARATION_TIME / 2),
-        1,
-      )
+      const progress = Math.min(elapsed / (config.preparationTimeMs / 2), 1)
       setHoldProgress(progress)
 
       if (progress < 1 && isInCenter) {
         frame = requestAnimationFrame(updateProgress)
       } else if (progress >= 1) {
-        if (gameState === 'waiting') {
-          startGame()
-        }
-        if (gameState === 'finished') {
-          setCurrentRound(0)
-          setRoundResults([])
-          setMousePath({ points: [], startTime: 0 })
-          startGame()
-        }
+        if (gameState === 'waiting' || gameState === 'finished') startGame()
         setHoldProgress(0)
       }
     }
@@ -196,34 +202,31 @@ export const useGameEngine = (
     return () => {
       if (frame) cancelAnimationFrame(frame)
     }
-  }, [isInCenter, gameState, startGame])
+  }, [isInCenter, gameState, startGame, config.preparationTimeMs])
 
-  // подготовка к новому раунду
+  // preparing → start new round after delay
   useEffect(() => {
     if (gameState === 'preparing') {
-      const timer = setTimeout(
-        () => startNewRound(),
-        BASE_GAME_CONFIG.PREPARATION_TIME,
-      )
+      const timer = setTimeout(() => startNewRound(), config.preparationTimeMs)
       return () => clearTimeout(timer)
     }
-  }, [gameState, startNewRound])
+  }, [gameState, startNewRound, config.preparationTimeMs])
 
-  // отправка результатов
+  // finished → submit raw capture
   useEffect(() => {
-    if (gameState === 'finished') {
-      submitResults({
-        rounds: roundResults.map((result) => ({
-          accuracy_score: result.accuracyScore,
-          distance_from_center: result.distanceFromCenter,
-          time: {
-            value_ms: result.time.valueMs,
-            score: result.time.score,
-          },
-        })),
-      })
+    if (gameState !== 'finished' || submittedRef.current) return
+    submittedRef.current = true
+
+    const payload: RawSessionRequest = {
+      field_width: canvasSize,
+      field_height: canvasSize,
+      target_radius: config.targetRadius,
+      trials: trialsRef.current,
     }
-  }, [gameState, roundResults, submitResults])
+    submitResults(payload)
+      .then(setResult)
+      .catch(() => {})
+  }, [gameState, canvasSize, config.targetRadius, submitResults])
 
   return {
     containerRef,
@@ -231,10 +234,10 @@ export const useGameEngine = (
     currentRound,
     targetPosition,
     mousePosition,
-    roundResults,
     isInCenter,
     holdProgress,
     canvasSize,
+    result,
     handleMouseMove,
     handleMouseClick,
   }

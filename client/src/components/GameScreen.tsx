@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useGameResults } from '@/hooks/useGameResults'
+import { useSessionConfig } from '@/hooks/useSessionConfig'
 import GameCanvas from '@/components/GameCanvas'
 import GameStatus from '@/components/GameStatus'
 import GameResults from '@/components/GameResults'
@@ -10,8 +11,8 @@ import { signOut, useSession } from '@/services/authClient'
 import { useNavigate } from 'react-router-dom'
 
 const GameScreen = () => {
-  const { submitResults } = useGameResults()
-  const engine = useGameEngine(submitResults)
+  const { config, error: configError } = useSessionConfig()
+  const { submitResults, isLoading, error: submitError } = useGameResults()
   const { data: session } = useSession()
   const navigate = useNavigate()
 
@@ -23,10 +24,45 @@ const GameScreen = () => {
     navigate('/login', { replace: true })
   }
 
+  if (configError) {
+    return <div className="p-6 text-red-600">Ошибка загрузки настроек: {configError}</div>
+  }
+  if (!config) {
+    return <div className="p-6">Загрузка настроек...</div>
+  }
+
+  return <GameScreenInner
+    config={config}
+    submitResults={submitResults}
+    isLoading={isLoading}
+    submitError={submitError}
+    displayName={displayName}
+    onSignOut={handleSignOut}
+  />
+}
+
+interface InnerProps {
+  config: NonNullable<ReturnType<typeof useSessionConfig>['config']>
+  submitResults: ReturnType<typeof useGameResults>['submitResults']
+  isLoading: boolean
+  submitError: string | null
+  displayName?: string | null
+  onSignOut: () => void
+}
+
+const GameScreenInner = ({
+  config,
+  submitResults,
+  isLoading,
+  submitError,
+  displayName,
+  onSignOut,
+}: InnerProps) => {
+  const engine = useGameEngine(config, submitResults)
+
   return (
     <div className="bg-gray-100 flex flex-col items-center p-4 max-h-screen h-full">
       <div className="rounded-lg w-full max-w-7xl mx-auto flex flex-col gap-4 flex-1 max-h-screen h-full">
-        {/* Header */}
         <div className="bg-white p-4 rounded-lg shadow-lg w-full flex-shrink-0 grid grid-cols-[155px_1fr_auto] items-center relative gap-4">
           <img className="w-[155px] object-contain" src={Logo} alt="Логотип" />
           <h1 className="text-3xl font-bold text-center">
@@ -41,7 +77,7 @@ const GameScreen = () => {
               Профиль
             </Link>
             <button
-              onClick={handleSignOut}
+              onClick={onSignOut}
               className="bg-gray-600 text-white rounded px-3 py-1 text-sm font-semibold"
             >
               Выход
@@ -49,10 +85,11 @@ const GameScreen = () => {
           </div>
         </div>
 
-        {/* Game area */}
         <div className="flex gap-4 flex-row items-start flex-1 min-h-0 min-w-0">
           <GameCanvas
             canvasSize={engine.canvasSize}
+            targetRadius={config.targetRadius}
+            centerTolerance={config.centerTolerance}
             gameState={engine.gameState}
             targetPosition={engine.targetPosition}
             mousePosition={engine.mousePosition}
@@ -66,16 +103,18 @@ const GameScreen = () => {
             <GameStatus
               gameState={engine.gameState}
               currentRound={engine.currentRound}
+              roundsCount={config.roundsCount}
             />
 
             <GameResults
-              roundResults={engine.roundResults}
               gameState={engine.gameState}
+              result={engine.result}
+              isSubmitting={isLoading}
+              error={submitError}
             />
           </div>
         </div>
 
-        {/* Footer */}
         <div className="w-full flex-shrink-0 h-[100px] flex items-center">
           <img className="h-full" src={esportsFederationLogo} alt="" />
           <p className="flex flex-col">

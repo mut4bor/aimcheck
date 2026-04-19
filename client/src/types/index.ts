@@ -5,48 +5,82 @@ export interface Point {
   y: number
 }
 
-export interface RoundResult {
-  accuracyScore: number
-  distanceFromCenter: number
-  time: {
-    valueMs: number
-    score: number
-  }
+export interface TrajectoryPoint {
+  x: number
+  y: number
+  t: number
 }
 
-export interface MousePath {
-  points: Point[]
-  startTime: number
+export interface RawTrial {
+  round_number: number
+  appeared_at_ms: number
+  clicked_at_ms: number
+  target_x: number
+  target_y: number
+  start_cursor_x: number
+  start_cursor_y: number
+  click_x: number
+  click_y: number
+  trajectory: TrajectoryPoint[]
+  between_samples: TrajectoryPoint[]
 }
 
-export interface Round {
-  accuracy_score: number // 0-100
-  distance_from_center: number // 0-100 (100 = точное попадание в центр, 0 = максимальное отклонение)
-  time: {
-    value_ms: number // время в милисекундах
-    score: number // 0-100
-  } // время
+export interface RawSessionRequest {
+  field_width: number
+  field_height: number
+  target_radius: number
+  trials: RawTrial[]
 }
 
-export interface GameResultRequest {
-  rounds: Round[] // ровно 3 раунда
+export interface TrialScores {
+  rt_ms: number
+  hit_distance: number
+  hit_score: number
+  movement_delta_pct: number
+  movement_score: number
+  overshoots: number
+  undershoots: number
+  parasitic_score: number
+  positioning_rho_pct: number | null
+  positioning_score: number | null
+  loops_count: number
+  stability_score: number
 }
 
-export interface GameResultResponse {
-  message: string
-  gameResultId: number
+export interface SessionScores {
+  f_hit: number
+  f_positioning: number
+  f_reaction: number
+  f_movement: number
+  f_parasitic: number
+  f_stability: number
+  integral_score: number
+}
+
+export interface SessionSubmitResponse {
+  sessionId: number
+  session: SessionScores
+  trials: TrialScores[]
+}
+
+export interface SessionConfig {
   roundsCount: number
+  targetRadius: number
+  preparationTimeMs: number
+  centerTolerance: number
 }
 
-export interface UserGameResult {
-  game_id: number
+export interface UserSessionSummary {
+  id: number
   created_at: string
-  avg_accuracy: string | number
-  avg_distance_from_center: string | number
-  avg_time_value_ms: string | number
-  avg_time_score: string | number
-  combined_score: string | number
-  rounds_count: string | number
+  rounds_count: number
+  f_hit: number
+  f_positioning: number
+  f_reaction: number
+  f_movement: number
+  f_parasitic: number
+  f_stability: number
+  integral_score: number
 }
 
 export interface ApiError {

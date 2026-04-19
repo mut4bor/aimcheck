@@ -1,76 +1,100 @@
 import { Request, Response, NextFunction } from 'express'
-import { GameResultRequest } from '../types/game.js'
+import { RawSessionRequest, TrajectoryPoint } from '../types/game.js'
+import { SCORING_CONFIG } from '../config/scoring.js'
 
-export function validateGameResult(
+const MAX_POINTS_PER_ARRAY = 20000
+
+function isPoint(p: unknown): p is TrajectoryPoint {
+  if (typeof p !== 'object' || p === null) return false
+  const r = p as Record<string, unknown>
+  return (
+    typeof r.x === 'number' &&
+    typeof r.y === 'number' &&
+    typeof r.t === 'number' &&
+    Number.isFinite(r.x) &&
+    Number.isFinite(r.y) &&
+    Number.isFinite(r.t)
+  )
+}
+
+function validatePointArray(
+  arr: unknown,
+  name: string,
+): string | null {
+  if (!Array.isArray(arr)) return `${name} must be an array`
+  if (arr.length > MAX_POINTS_PER_ARRAY)
+    return `${name} exceeds ${MAX_POINTS_PER_ARRAY} points`
+  for (let i = 0; i < arr.length; i++) {
+    if (!isPoint(arr[i])) return `${name}[${i}] invalid shape`
+    if (i > 0 && (arr[i] as TrajectoryPoint).t < (arr[i - 1] as TrajectoryPoint).t)
+      return `${name} timestamps must be monotonic`
+  }
+  return null
+}
+
+export function validateSessionCapture(
   req: Request,
   res: Response,
   next: NextFunction,
 ): void {
-  const { rounds }: GameResultRequest = req.body
+  const body = req.body as RawSessionRequest
 
-  if (!rounds || !Array.isArray(rounds)) {
-    res.status(400).json({ error: 'rounds must be an array' })
+  if (!body || typeof body !== 'object') {
+    res.status(400).json({ error: 'invalid body' })
     return
   }
 
-  if (rounds.length !== 3) {
-    res.status(400).json({ error: 'Must contain exactly 3 rounds' })
+  if (
+    typeof body.field_width !== 'number' ||
+    typeof body.field_height !== 'number' ||
+    typeof body.target_radius !== 'number' ||
+    body.field_width <= 0 ||
+    body.field_height <= 0 ||
+    body.target_radius <= 0
+  ) {
+    res.status(400).json({ error: 'invalid field dimensions or target_radius' })
     return
   }
 
-  for (let i = 0; i < rounds.length; i++) {
-    const round = rounds[i]
+  if (!Array.isArray(body.trials) || body.trials.length !== SCORING_CONFIG.ROUNDS_COUNT) {
+    res.status(400).json({
+      error: `trials must be an array of exactly ${SCORING_CONFIG.ROUNDS_COUNT} entries`,
+    })
+    return
+  }
 
-    if (
-      typeof round.accuracy_score !== 'number' ||
-      typeof round.distance_from_center !== 'number' ||
-      typeof round.time !== 'object' ||
-      round.time === null
-    ) {
-      res.status(400).json({
-        error: `Round ${i + 1}: invalid field types`,
-      })
+  for (let i = 0; i < body.trials.length; i++) {
+    const t = body.trials[i]
+    const numericFields: (keyof typeof t)[] = [
+      'round_number',
+      'appeared_at_ms',
+      'clicked_at_ms',
+      'target_x',
+      'target_y',
+      'start_cursor_x',
+      'start_cursor_y',
+      'click_x',
+      'click_y',
+    ]
+    for (const f of numericFields) {
+      if (typeof t[f] !== 'number' || !Number.isFinite(t[f] as number)) {
+        res.status(400).json({ error: `trial ${i}: ${String(f)} must be a finite number` })
+        return
+      }
+    }
+    if (t.clicked_at_ms < t.appeared_at_ms) {
+      res.status(400).json({ error: `trial ${i}: clicked_at_ms before appeared_at_ms` })
       return
     }
 
-    if (
-      typeof round.time.value_ms !== 'number' ||
-      typeof round.time.score !== 'number'
-    ) {
-      res
-        .status(400)
-        .json({ error: `Round ${i + 1}: time.value_ms and time.score must be numbers` })
+    const trajErr = validatePointArray(t.trajectory, `trial ${i} trajectory`)
+    if (trajErr) {
+      res.status(400).json({ error: trajErr })
       return
     }
-
-    if (round.accuracy_score < 0 || round.accuracy_score > 100) {
-      res.status(400).json({ error: `Round ${i + 1}: accuracy_score out of range` })
-      return
-    }
-
-    if (round.distance_from_center < 0 || round.distance_from_center > 100) {
-      res
-        .status(400)
-        .json({ error: `Round ${i + 1}: distance_from_center out of range` })
-      return
-    }
-
-    if (round.time.value_ms <= 0) {
-      res.status(400).json({ error: `Round ${i + 1}: time.value_ms must be positive` })
-      return
-    }
-
-    if (round.time.score < 0 || round.time.score > 100) {
-      res.status(400).json({ error: `Round ${i + 1}: time.score out of range` })
-      return
-    }
-
-    if (
-      !Number.isInteger(round.accuracy_score) ||
-      !Number.isInteger(round.distance_from_center) ||
-      !Number.isInteger(round.time.score)
-    ) {
-      res.status(400).json({ error: `Round ${i + 1}: scores must be integers` })
+    const btwErr = validatePointArray(t.between_samples, `trial ${i} between_samples`)
+    if (btwErr) {
+      res.status(400).json({ error: btwErr })
       return
     }
   }

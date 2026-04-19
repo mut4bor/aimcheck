@@ -1,12 +1,12 @@
 import { GameState } from '@/types'
-import { BASE_GAME_CONFIG } from '@/constants'
 
 interface Props {
   gameState: GameState
   currentRound: number
+  roundsCount: number
 }
 
-const GameStatus = ({ gameState, currentRound }: Props) => {
+const GameStatus = ({ gameState, currentRound, roundsCount }: Props) => {
   return (
     <div className="rounded-lg bg-white p-4 shadow-lg flex-shrink-0">
       <h3 className="font-semibold mb-2">Состояние</h3>
@@ -20,8 +20,8 @@ const GameStatus = ({ gameState, currentRound }: Props) => {
       )}
       {gameState === 'playing' && (
         <p className="text-green-600">
-          Раунд {currentRound + 1}/{BASE_GAME_CONFIG.ROUNDS_COUNT} - ведите
-          курсор к цели и кликните!
+          Раунд {currentRound + 1}/{roundsCount} - ведите курсор к цели и
+          кликните!
         </p>
       )}
       {gameState === 'finished' && (

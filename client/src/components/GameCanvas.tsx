@@ -1,21 +1,25 @@
 import { useRef, useEffect, MouseEvent, RefObject } from 'react'
 import { Point, GameState } from '@/types'
-import { BASE_GAME_CONFIG } from '@/constants'
+import { UI_CONFIG } from '@/constants'
 
 interface Props {
   canvasSize: number
+  targetRadius: number
+  centerTolerance: number
   gameState: GameState
   targetPosition: Point
   mousePosition: Point
   isInCenter: boolean
-  holdProgress?: number // ⬅️ прогресс удержания (0–1)
+  holdProgress?: number
   onMouseMove: (e: MouseEvent<HTMLCanvasElement>) => void
-  onMouseClick: () => void
+  onMouseClick: (e: MouseEvent<HTMLCanvasElement>) => void
   containerRef: RefObject<HTMLDivElement | null>
 }
 
 const GameCanvas = ({
   canvasSize,
+  targetRadius,
+  centerTolerance,
   gameState,
   targetPosition,
   mousePosition,
@@ -26,8 +30,7 @@ const GameCanvas = ({
   containerRef,
 }: Props) => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-
-  const CIRCLE_RADIUS = (canvasSize - BASE_GAME_CONFIG.TARGET_SIZE * 2) / 2 - 20
+  const CIRCLE_RADIUS = (canvasSize - targetRadius * 2) / 2 - 20
   const centerX = canvasSize / 2
   const centerY = canvasSize / 2
 
@@ -39,21 +42,18 @@ const GameCanvas = ({
 
     ctx.clearRect(0, 0, canvasSize, canvasSize)
 
-    // окружность
     ctx.beginPath()
     ctx.arc(centerX, centerY, CIRCLE_RADIUS, 0, 2 * Math.PI)
     ctx.strokeStyle = '#000'
     ctx.lineWidth = 2
     ctx.stroke()
 
-    // центр
     ctx.beginPath()
-    ctx.arc(centerX, centerY, BASE_GAME_CONFIG.CENTER_TOLERANCE, 0, 2 * Math.PI)
+    ctx.arc(centerX, centerY, centerTolerance, 0, 2 * Math.PI)
     ctx.strokeStyle = isInCenter ? '#00ff00' : '#ff0000'
     ctx.lineWidth = 1
     ctx.stroke()
 
-    // прогресс удержания (дуга)
     if (
       (gameState === 'waiting' || gameState === 'finished') &&
       holdProgress > 0
@@ -62,7 +62,7 @@ const GameCanvas = ({
       ctx.arc(
         centerX,
         centerY,
-        BASE_GAME_CONFIG.CENTER_TOLERANCE - 2,
+        centerTolerance - 2,
         -Math.PI / 2,
         -Math.PI / 2 + 2 * Math.PI * holdProgress,
       )
@@ -71,13 +71,12 @@ const GameCanvas = ({
       ctx.stroke()
     }
 
-    // цель
     if (gameState === 'playing') {
       ctx.beginPath()
       ctx.arc(
         targetPosition.x,
         targetPosition.y,
-        BASE_GAME_CONFIG.TARGET_SIZE,
+        UI_CONFIG.TARGET_SIZE,
         0,
         2 * Math.PI,
       )
@@ -87,7 +86,6 @@ const GameCanvas = ({
       ctx.lineWidth = 2
       ctx.stroke()
 
-      // линия от центра
       ctx.beginPath()
       ctx.moveTo(centerX, centerY)
       ctx.lineTo(targetPosition.x, targetPosition.y)
@@ -98,7 +96,6 @@ const GameCanvas = ({
       ctx.setLineDash([])
     }
 
-    // курсор
     ctx.beginPath()
     ctx.arc(mousePosition.x, mousePosition.y, 5, 0, 2 * Math.PI)
     ctx.fillStyle = '#0066cc'
@@ -111,6 +108,9 @@ const GameCanvas = ({
     canvasSize,
     CIRCLE_RADIUS,
     holdProgress,
+    centerX,
+    centerY,
+    centerTolerance,
   ])
 
   return (

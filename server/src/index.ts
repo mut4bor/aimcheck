@@ -3,10 +3,11 @@ import cors from 'cors'
 import dotenv from 'dotenv'
 import { toNodeHandler } from 'better-auth/node'
 import { GameService } from './services/gameService.js'
-import { validateGameResult } from './middleware/validation.js'
+import { validateSessionCapture } from './middleware/validation.js'
 import { requireAuth, AuthedRequest } from './middleware/requireAuth.js'
-import { GameResultRequest } from './types/game.js'
+import { RawSessionRequest, SessionConfigResponse } from './types/game.js'
 import { runMigrations } from './database/migrations.js'
+import { SCORING_CONFIG } from './config/scoring.js'
 import { auth } from './auth.js'
 
 dotenv.config()
@@ -26,27 +27,35 @@ app.use(
   }),
 )
 
-// Better-auth handler must be mounted BEFORE express.json()
 app.all('/api/auth/*splat', toNodeHandler(auth))
 
 app.use(express.json({ limit: '10mb' }))
 
+app.get('/api/session/config', (_req, res) => {
+  const payload: SessionConfigResponse = {
+    roundsCount: SCORING_CONFIG.ROUNDS_COUNT,
+    targetRadius: SCORING_CONFIG.TARGET_RADIUS,
+    preparationTimeMs: SCORING_CONFIG.PREPARATION_TIME_MS,
+    centerTolerance: SCORING_CONFIG.CENTER_TOLERANCE,
+  }
+  res.json(payload)
+})
+
 app.post(
-  '/api/game-results',
+  '/api/sessions',
   requireAuth,
-  validateGameResult,
+  validateSessionCapture,
   async (req: AuthedRequest, res) => {
     try {
-      const { rounds }: GameResultRequest = req.body
-      const gameResultId = await gameService.saveGameResult(req.user!.id, rounds)
-
+      const raw = req.body as RawSessionRequest
+      const result = await gameService.saveSession(req.user!.id, raw)
       res.status(201).json({
-        message: 'Game result saved successfully',
-        gameResultId,
-        roundsCount: rounds.length,
+        sessionId: result.sessionId,
+        session: result.session,
+        trials: result.trials,
       })
     } catch (error) {
-      console.error('Error saving game result:', error)
+      console.error('Error saving session:', error)
       res.status(500).json({
         error: 'Internal server error',
         message: error instanceof Error ? error.message : 'Unknown error',
@@ -57,35 +66,35 @@ app.post(
 
 app.get('/api/my-results', requireAuth, async (req: AuthedRequest, res) => {
   try {
-    const results = await gameService.getUserResults(req.user!.id)
-    res.json({ user: req.user, results })
+    const sessions = await gameService.getUserSessions(req.user!.id)
+    res.json({ user: req.user, sessions })
   } catch (error) {
-    console.error('Error fetching user results:', error)
+    console.error('Error fetching user sessions:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 })
 
 app.get(
-  '/api/my-results/:gameId',
+  '/api/my-results/:sessionId',
   requireAuth,
   async (req: AuthedRequest, res) => {
     try {
-      const gameId = parseInt(req.params.gameId)
-      if (isNaN(gameId)) {
-        res.status(400).json({ error: 'Invalid game ID' })
+      const sessionId = parseInt(req.params.sessionId)
+      if (isNaN(sessionId)) {
+        res.status(400).json({ error: 'Invalid session ID' })
         return
       }
-      const details = await gameService.getGameDetailsForUser(
-        gameId,
+      const details = await gameService.getSessionForUser(
+        sessionId,
         req.user!.id,
       )
       if (!details) {
-        res.status(404).json({ error: 'Game not found' })
+        res.status(404).json({ error: 'Session not found' })
         return
       }
       res.json(details)
     } catch (error) {
-      console.error('Error fetching game details:', error)
+      console.error('Error fetching session details:', error)
       res.status(500).json({ error: 'Internal server error' })
     }
   },

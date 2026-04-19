@@ -1,34 +1,31 @@
 import { useState, useCallback } from 'react'
 import { GameApiService } from '@/services/gameApiService'
-import { GameResultRequest, GameResultResponse } from '@/types'
+import { RawSessionRequest, SessionSubmitResponse } from '@/types'
 
 interface UseGameResultsReturn {
-  submitResults: (data: GameResultRequest) => Promise<GameResultResponse>
+  submitResults: (data: RawSessionRequest) => Promise<SessionSubmitResponse>
   isLoading: boolean
   error: string | null
-  lastResponse: GameResultResponse | null
+  lastResponse: SessionSubmitResponse | null
 }
 
 export const useGameResults = (): UseGameResultsReturn => {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [lastResponse, setLastResponse] = useState<GameResultResponse | null>(
-    null,
-  )
+  const [lastResponse, setLastResponse] =
+    useState<SessionSubmitResponse | null>(null)
 
   const submitResults = useCallback(
-    async (data: GameResultRequest): Promise<GameResultResponse> => {
+    async (data: RawSessionRequest): Promise<SessionSubmitResponse> => {
       setIsLoading(true)
       setError(null)
-
       try {
-        const response = await GameApiService.submitGameResults(data)
+        const response = await GameApiService.submitSession(data)
         setLastResponse(response)
         return response
       } catch (err) {
-        const errorMessage =
-          err instanceof Error ? err.message : 'Unknown error occurred'
-        setError(errorMessage)
+        const msg = err instanceof Error ? err.message : 'Unknown error occurred'
+        setError(msg)
         throw err
       } finally {
         setIsLoading(false)
@@ -37,10 +34,5 @@ export const useGameResults = (): UseGameResultsReturn => {
     [],
   )
 
-  return {
-    submitResults,
-    isLoading,
-    error,
-    lastResponse,
-  }
+  return { submitResults, isLoading, error, lastResponse }
 }
