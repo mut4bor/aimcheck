@@ -8,53 +8,89 @@ import { SessionDetailResponse } from '@/types'
 const fmt = (n: number | string | null, d = 1) =>
   n == null ? '—' : (typeof n === 'number' ? n : Number(n)).toFixed(d)
 
-const CRITERIA: { key: keyof SessionDetailResponse['session']; label: string }[] = [
-  { key: 'f_hit', label: 'Попадание' },
-  { key: 'f_positioning', label: 'Позиционирование' },
-  { key: 'f_reaction', label: 'Реакция' },
-  { key: 'f_movement', label: 'Движения' },
-  { key: 'f_parasitic', label: 'Паразитные' },
-  { key: 'f_stability', label: 'Устойчивость' },
+const CRITERIA: {
+  key: keyof SessionDetailResponse['session']
+  label: string
+}[] = [
+  { key: 'f_reaction', label: 'Скорость наведения' },
+  { key: 'f_hit', label: 'Точность попадания' },
+  { key: 'f_movement', label: 'Точность движений' },
+  { key: 'f_parasitic', label: 'Паразитические движения' },
+  { key: 'f_positioning', label: 'Позиционирование курсора' },
+  { key: 'f_stability', label: 'Устойчивость траектории' },
 ]
 
 const RadarChart = ({
   values,
   labels,
-  size = 360,
+  radius = 100,
   max = 100,
 }: {
   values: number[]
   labels: string[]
-  size?: number
+  radius?: number
   max?: number
 }) => {
-  const cx = size / 2
-  const cy = size / 2
-  const r = size / 2 - 60
+  const r = radius
   const n = values.length
   const angle = (i: number) => (Math.PI * 2 * i) / n - Math.PI / 2
 
   const point = (v: number, i: number) => {
     const ratio = Math.max(0, Math.min(1, v / max))
-    return [cx + Math.cos(angle(i)) * r * ratio, cy + Math.sin(angle(i)) * r * ratio]
+    return [Math.cos(angle(i)) * r * ratio, Math.sin(angle(i)) * r * ratio]
   }
 
   const axisPoint = (i: number, ratio = 1) => [
-    cx + Math.cos(angle(i)) * r * ratio,
-    cy + Math.sin(angle(i)) * r * ratio,
+    Math.cos(angle(i)) * r * ratio,
+    Math.sin(angle(i)) * r * ratio,
   ]
 
   const polygon = values.map((v, i) => point(v, i).join(',')).join(' ')
   const gridLevels = [0.25, 0.5, 0.75, 1]
 
+  const labelRatio = 1.25
+  const labelFontSize = 12
+  const labelCharWidth = 8
+  const labelLineHeight = labelFontSize
+
+  let left = r
+  let right = r
+  let top = r
+  let bottom = r
+  labels.forEach((l, i) => {
+    const [x, y] = axisPoint(i, labelRatio)
+    const w = l.length * labelCharWidth
+    const h = labelLineHeight
+    if (x > 0) right = Math.max(right, x + w)
+    else if (x < 0) left = Math.max(left, -x + w)
+    else {
+      right = Math.max(right, w / 2)
+      left = Math.max(left, w / 2)
+    }
+    if (y > 0) bottom = Math.max(bottom, y + h)
+    else if (y < 0) top = Math.max(top, -y + h)
+    else {
+      bottom = Math.max(bottom, h / 2)
+      top = Math.max(top, h / 2)
+    }
+  })
+
+  const width = left + right
+  const height = top + bottom
+  const minX = -left
+  const minY = -top
+
   return (
-    <svg width={size} height={size} className="block">
+    <svg
+      width={width}
+      height={height}
+      viewBox={`${minX} ${minY} ${width} ${height}`}
+      className="block"
+    >
       {gridLevels.map((lvl) => (
         <polygon
           key={lvl}
-          points={labels
-            .map((_, i) => axisPoint(i, lvl).join(','))
-            .join(' ')}
+          points={labels.map((_, i) => axisPoint(i, lvl).join(',')).join(' ')}
           fill="none"
           stroke="#d1d5db"
           strokeWidth={1}
@@ -65,8 +101,8 @@ const RadarChart = ({
         return (
           <line
             key={i}
-            x1={cx}
-            y1={cy}
+            x1={0}
+            y1={0}
             x2={x}
             y2={y}
             stroke="#d1d5db"
@@ -85,14 +121,16 @@ const RadarChart = ({
         return <circle key={i} cx={x} cy={y} r={3} fill="#2563eb" />
       })}
       {labels.map((l, i) => {
-        const [x, y] = axisPoint(i, 1.15)
+        const [x, y] = axisPoint(i, 1.25)
+        const anchor = Math.abs(x) < 1 ? 'middle' : x > 0 ? 'start' : 'end'
+        const baseline = Math.abs(y) < 1 ? 'middle' : y > 0 ? 'hanging' : 'auto'
         return (
           <text
             key={l}
             x={x}
             y={y}
-            textAnchor="middle"
-            dominantBaseline="middle"
+            textAnchor={anchor}
+            dominantBaseline={baseline}
             className="fill-gray-700"
             fontSize={12}
           >
@@ -102,9 +140,9 @@ const RadarChart = ({
       })}
       {values.map((v, i) => {
         const [x, y] = point(v, i)
-        const [lx, ly] = axisPoint(i, 1.02)
-        const tx = (x + lx) / 2
-        const ty = (y + ly) / 2
+        const offset = 12
+        const tx = x + Math.cos(angle(i)) * offset
+        const ty = y + Math.sin(angle(i)) * offset
         return (
           <text
             key={`v-${i}`}
@@ -169,14 +207,14 @@ const SessionDetail = () => {
           </Link>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+        <div className="flex flex-row gap-6 flex-wrap items-center">
           <div className="flex justify-center">
             <RadarChart
               values={radarValues}
               labels={CRITERIA.map((c) => c.label)}
             />
           </div>
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2 flex-1">
             <div className="text-lg">
               Интегральный балл:{' '}
               <span className="font-bold text-blue-700">
@@ -231,10 +269,14 @@ const SessionDetail = () => {
                   <td className="px-3 py-2 border-b">
                     {fmt(t.movement_delta_pct)}
                   </td>
-                  <td className="px-3 py-2 border-b">{fmt(t.movement_score)}</td>
+                  <td className="px-3 py-2 border-b">
+                    {fmt(t.movement_score)}
+                  </td>
                   <td className="px-3 py-2 border-b">{t.overshoots}</td>
                   <td className="px-3 py-2 border-b">{t.undershoots}</td>
-                  <td className="px-3 py-2 border-b">{fmt(t.parasitic_score)}</td>
+                  <td className="px-3 py-2 border-b">
+                    {fmt(t.parasitic_score)}
+                  </td>
                   <td className="px-3 py-2 border-b">
                     {fmt(t.positioning_rho_pct)}
                   </td>
@@ -242,7 +284,9 @@ const SessionDetail = () => {
                     {fmt(t.positioning_score)}
                   </td>
                   <td className="px-3 py-2 border-b">{t.loops_count}</td>
-                  <td className="px-3 py-2 border-b">{fmt(t.stability_score)}</td>
+                  <td className="px-3 py-2 border-b">
+                    {fmt(t.stability_score)}
+                  </td>
                 </tr>
               ))}
             </tbody>

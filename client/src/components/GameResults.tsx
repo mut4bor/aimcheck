@@ -14,11 +14,11 @@ const CRITERIA: {
   label: string
   weight: number
 }[] = [
-  { key: 'f_hit', label: 'Точность попадания', weight: 1.5 },
-  { key: 'f_positioning', label: 'Позиционирование курсора', weight: 1.5 },
   { key: 'f_reaction', label: 'Скорость наведения', weight: 1.0 },
+  { key: 'f_hit', label: 'Точность попадания', weight: 1.5 },
   { key: 'f_movement', label: 'Точность движений', weight: 0.75 },
   { key: 'f_parasitic', label: 'Паразитические движения', weight: 0.5 },
+  { key: 'f_positioning', label: 'Позиционирование курсора', weight: 1.5 },
   { key: 'f_stability', label: 'Устойчивость траектории', weight: 0.5 },
 ]
 

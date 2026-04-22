@@ -73,12 +73,12 @@ const Profile = () => {
                   <th className="px-3 py-2 border-b">#</th>
                   <th className="px-3 py-2 border-b">Дата</th>
                   <th className="px-3 py-2 border-b">Раундов</th>
-                  <th className="px-3 py-2 border-b">Попадание</th>
-                  <th className="px-3 py-2 border-b">Позиц.</th>
-                  <th className="px-3 py-2 border-b">Реакция</th>
-                  <th className="px-3 py-2 border-b">Движения</th>
-                  <th className="px-3 py-2 border-b">Параз.</th>
-                  <th className="px-3 py-2 border-b">Устойч.</th>
+                  <th className="px-3 py-2 border-b">Скорость наведения</th>
+                  <th className="px-3 py-2 border-b">Точность попадания</th>
+                  <th className="px-3 py-2 border-b">Точность движений</th>
+                  <th className="px-3 py-2 border-b">Паразитические движения</th>
+                  <th className="px-3 py-2 border-b">Позиционирование курсора</th>
+                  <th className="px-3 py-2 border-b">Устойчивость траектории</th>
                   <th className="px-3 py-2 border-b">ИБ</th>
                 </tr>
               </thead>
@@ -105,17 +105,12 @@ const Profile = () => {
                       </td>
                       <td>
                         <Link to={to} className={cell}>
-                          {fmt(s.f_hit)}
-                        </Link>
-                      </td>
-                      <td>
-                        <Link to={to} className={cell}>
-                          {fmt(s.f_positioning)}
-                        </Link>
-                      </td>
-                      <td>
-                        <Link to={to} className={cell}>
                           {fmt(s.f_reaction)}
+                        </Link>
+                      </td>
+                      <td>
+                        <Link to={to} className={cell}>
+                          {fmt(s.f_hit)}
                         </Link>
                       </td>
                       <td>
@@ -126,6 +121,11 @@ const Profile = () => {
                       <td>
                         <Link to={to} className={cell}>
                           {fmt(s.f_parasitic)}
+                        </Link>
+                      </td>
+                      <td>
+                        <Link to={to} className={cell}>
+                          {fmt(s.f_positioning)}
                         </Link>
                       </td>
                       <td>

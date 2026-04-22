@@ -25,20 +25,26 @@ const GameScreen = () => {
   }
 
   if (configError) {
-    return <div className="p-6 text-red-600">Ошибка загрузки настроек: {configError}</div>
+    return (
+      <div className="p-6 text-red-600">
+        Ошибка загрузки настроек: {configError}
+      </div>
+    )
   }
   if (!config) {
     return <div className="p-6">Загрузка настроек...</div>
   }
 
-  return <GameScreenInner
-    config={config}
-    submitResults={submitResults}
-    isLoading={isLoading}
-    submitError={submitError}
-    displayName={displayName}
-    onSignOut={handleSignOut}
-  />
+  return (
+    <GameScreenInner
+      config={config}
+      submitResults={submitResults}
+      isLoading={isLoading}
+      submitError={submitError}
+      displayName={displayName}
+      onSignOut={handleSignOut}
+    />
+  )
 }
 
 interface InnerProps {
@@ -62,7 +68,7 @@ const GameScreenInner = ({
 
   return (
     <div className="bg-gray-100 flex flex-col items-center p-4 max-h-screen h-full">
-      <div className="rounded-lg w-full max-w-7xl mx-auto flex flex-col gap-4 flex-1 max-h-screen h-full">
+      <div className="rounded-lg w-full mx-auto flex flex-col gap-4 flex-1 max-h-screen h-full">
         <div className="bg-white p-4 rounded-lg shadow-lg w-full flex-shrink-0 grid grid-cols-[155px_1fr_auto] items-center relative gap-4">
           <img className="w-[155px] object-contain" src={Logo} alt="Логотип" />
           <h1 className="text-3xl font-bold text-center">
@@ -85,7 +91,7 @@ const GameScreenInner = ({
           </div>
         </div>
 
-        <div className="flex gap-4 flex-row items-start flex-1 min-h-0 min-w-0">
+        <div className="flex gap-4 flex-row items-start justify-center flex-1 min-h-0 min-w-0">
           <GameCanvas
             canvasSize={engine.canvasSize}
             targetRadius={config.targetRadius}
@@ -99,7 +105,7 @@ const GameScreenInner = ({
             onMouseClick={engine.handleMouseClick}
             containerRef={engine.containerRef}
           />
-          <div className="flex flex-col gap-4 flex-1 min-w-0 min-h-0 overflow-y-auto h-full">
+          <div className="flex flex-col max-w-[600px] gap-4 flex-1 min-w-0 min-h-0 overflow-y-auto h-full">
             <GameStatus
               gameState={engine.gameState}
               currentRound={engine.currentRound}
