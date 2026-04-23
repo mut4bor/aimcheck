@@ -1,12 +1,17 @@
-# Aimcheck VPS Deploy Guide
+# Aimcheck Deploy Guide
 
-This guide assumes:
+This repository supports two deployment layouts:
 
-- Ubuntu 22.04 or 24.04 on the VPS
-- domain: `aimcheck.ru`
-- optional alias: `www.aimcheck.ru`
-- Docker images are published by GitHub Actions to `ghcr.io`
-- app files live in `/opt/aimcheck`
+- dedicated VPS with host Nginx
+- shared VPS with an existing Dockerized Nginx and Certbot stack
+
+Your current server is the second case. It already has `albavita-nginx-1` on public ports `80` and `443`, so this guide uses that shared-proxy layout.
+
+Important:
+
+- do not run host `nginx.service` for this setup
+- do not use `certbot --nginx` on the host for this setup
+- `aimcheck` should sit behind the existing Docker reverse proxy
 
 ## 1. DNS records
 
@@ -25,79 +30,70 @@ If your VPS has a public IPv6:
 Notes:
 
 - The correct IPv6 record type is `AAAA`, not `AA`.
-- If you prefer, `www` can be a `CNAME` to `aimcheck.ru` instead of separate `A` and `AAAA` records.
-- If you use Cloudflare, keep the records as `DNS only` during the first certificate issuance to avoid validation surprises.
-- Wait until DNS resolves to the VPS before running Certbot.
+- `www` can be a `CNAME` to `aimcheck.ru` if you prefer.
+- If you use Cloudflare, keep the records as `DNS only` during initial certificate issuance.
+- Wait for DNS to resolve to the VPS before requesting certificates.
 
 ## 2. Publish images from GitHub Actions
 
 Before the VPS can pull anything, the workflow must publish the images.
 
 1. Push the repository to GitHub.
-2. Make sure the workflow in `.github/workflows/publish-images.yml` runs successfully on `main`.
-3. Confirm these images exist in GHCR:
+2. Make sure `.github/workflows/publish-images.yml` succeeds on `main`.
+3. Confirm these images exist:
 
 ```text
 ghcr.io/<github-owner>/aimcheck-client:latest
 ghcr.io/<github-owner>/aimcheck-server:latest
 ```
 
-If the packages are private, either:
+If the packages are private, either make them public or log in on the VPS:
 
-- make the packages public in GitHub Packages, or
-- create a GitHub Personal Access Token with `read:packages` and use it on the VPS with `docker login ghcr.io`
+```bash
+docker login ghcr.io -u <github-username>
+```
+
+Use a GitHub token with `read:packages` when prompted.
 
 ## 3. Prepare the VPS
 
-Connect to the server and install the required software:
+Since Docker is already present on your server, install only what is still missing.
 
 ```bash
 sudo apt update
-sudo apt install -y git docker.io docker-compose-plugin nginx certbot python3-certbot-nginx
-sudo systemctl enable --now docker
-sudo systemctl enable --now nginx
-sudo usermod -aG docker $USER
+sudo apt install -y git
 ```
 
-If you use UFW, allow web traffic:
-
-```bash
-sudo ufw allow OpenSSH
-sudo ufw allow 'Nginx Full'
-sudo ufw enable
-```
-
-Log out and back in after adding your user to the `docker` group.
-
-## 4. Clone the project on the VPS
+Clone the project:
 
 ```bash
 sudo mkdir -p /opt/aimcheck
 sudo chown -R $USER:$USER /opt/aimcheck
-git clone https://github.com/<github-owner>/<repo-name>.git /opt/aimcheck
+git clone https://github.com/mut4bor/aimcheck.git /opt/aimcheck
 cd /opt/aimcheck
 ```
 
-If the repo is already cloned:
+If the repo is already there:
 
 ```bash
 cd /opt/aimcheck
 git pull
 ```
 
-## 5. Configure environment variables
+## 4. Configure the app environment
 
-Create the production `.env` from the example:
+Create `.env` from the example:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` and set real values:
+Set real values:
 
 ```env
 GHCR_NAMESPACE=your-github-username-or-org
 IMAGE_TAG=latest
+SHARED_PROXY_NETWORK=shared-proxy
 
 POSTGRES_DB=postgres
 POSTGRES_USER=postgres
@@ -112,83 +108,91 @@ Notes:
 
 - `GHCR_NAMESPACE` must be lowercase.
 - `IMAGE_TAG=latest` is the simplest setup.
-- If you want locked deployments, set `IMAGE_TAG` to a published commit SHA tag instead of `latest`.
+- If you want pinned deployments, use a published short SHA tag instead.
+- `SHARED_PROXY_NETWORK` is the Docker network used by both `aimcheck` and your existing reverse proxy container.
 
-## 6. Log in to GHCR if packages are private
+## 5. Create the shared Docker network
 
-Skip this step if the packages are public.
+Create the shared reverse-proxy network once:
 
 ```bash
-docker login ghcr.io -u <github-username>
+docker network create shared-proxy
 ```
 
-When prompted for the password, use your GitHub token with `read:packages`.
+If it already exists, Docker will tell you and you can continue.
 
-## 7. Start the containers
+## 6. Attach the existing Nginx container to the shared network
+
+Your existing public proxy container must be on the same Docker network as `aimcheck`.
+
+If the other project is managed by Docker Compose, add this to that project:
+
+```yaml
+services:
+  nginx:
+    networks:
+      - default
+      - shared-proxy
+
+networks:
+  shared-proxy:
+    external: true
+    name: shared-proxy
+```
+
+Then recreate that Nginx service.
+
+If you need a one-time manual attach first, you can also run:
+
+```bash
+docker network connect shared-proxy albavita-nginx-1
+```
+
+Important:
+
+- make the Compose change in the other project as well, otherwise the manual network attach can disappear when that stack is recreated
+- the Nginx container must still keep its current certbot-related volumes mounted
+
+## 7. Deploy aimcheck behind the shared proxy
+
+This repository includes [docker-compose.shared-proxy.yml](/e:/Sites/aimcheck/docker-compose.shared-proxy.yml:1), which attaches `aimcheck-client` and `aimcheck-server` to the shared proxy network with stable aliases.
+
+Run:
 
 ```bash
 cd /opt/aimcheck
-docker compose pull
-docker compose up -d
-docker compose ps
+docker compose -f docker-compose.yml -f docker-compose.shared-proxy.yml pull
+docker compose -f docker-compose.yml -f docker-compose.shared-proxy.yml up -d
+docker compose -f docker-compose.yml -f docker-compose.shared-proxy.yml ps
 ```
 
-At this point:
+On that shared network, the services will be reachable as:
 
-- frontend is available only on `127.0.0.1:8080`
-- backend is available only on `127.0.0.1:3000`
-- Postgres runs inside Docker and is not exposed publicly
+- `http://aimcheck-client`
+- `http://aimcheck-server:3000`
 
-## 8. Enable a temporary HTTP-only Nginx config
+## 8. Add the temporary HTTP config to the existing Nginx stack
 
-The final repo config uses certificate files, so do not enable it yet on a fresh server.
+For first-time certificate issuance, use the HTTP-only config from [deploy/nginx/aimcheck.ru.shared-proxy.http.conf](/e:/Sites/aimcheck/deploy/nginx/aimcheck.ru.shared-proxy.http.conf:1).
 
-Create `/etc/nginx/sites-available/aimcheck.ru.conf` with this temporary content:
-
-```nginx
-map $http_upgrade $connection_upgrade {
-    default upgrade;
-    '' close;
-}
-
-server {
-    listen 80;
-    listen [::]:80;
-    server_name aimcheck.ru www.aimcheck.ru;
-
-    client_max_body_size 10m;
-
-    location /api/ {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection $connection_upgrade;
-    }
-
-    location / {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection $connection_upgrade;
-    }
-}
-```
-
-Enable the site:
+Copy it into the config directory used by your existing Nginx container. Example:
 
 ```bash
-sudo ln -sf /etc/nginx/sites-available/aimcheck.ru.conf /etc/nginx/sites-enabled/aimcheck.ru.conf
-sudo rm -f /etc/nginx/sites-enabled/default
-sudo nginx -t
-sudo systemctl reload nginx
+cp /opt/aimcheck/deploy/nginx/aimcheck.ru.shared-proxy.http.conf <existing-nginx-conf-dir>/aimcheck.ru.conf
+```
+
+That directory must already be mounted into `albavita-nginx-1` as Nginx `conf.d` or an equivalent site directory.
+
+This temporary config does two things:
+
+- proxies `aimcheck.ru` to the new app
+- serves `/.well-known/acme-challenge/` from `/var/www/certbot`
+
+Reload the existing Nginx container:
+
+```bash
+docker exec albavita-nginx-1 nginx -t
+docker exec albavita-nginx-1 nginx -s reload
 ```
 
 Check:
@@ -198,36 +202,42 @@ curl -I http://aimcheck.ru
 curl -I http://aimcheck.ru/api/health
 ```
 
-## 9. Generate SSL certificates
+## 9. Generate certificates with the existing Certbot container
 
-Run Certbot after DNS is pointed to the VPS and port `80` is reachable:
+Your VPS already has `albavita-certbot-1`, so reuse that setup instead of host Certbot.
+
+This assumes:
+
+- the Nginx container serves `/.well-known/acme-challenge/` from `/var/www/certbot`
+- the Certbot container mounts the same `/var/www/certbot`
+- the Certbot container mounts `/etc/letsencrypt`
+
+Request the certificate:
 
 ```bash
-sudo certbot certonly --nginx -d aimcheck.ru -d www.aimcheck.ru
+docker exec -it albavita-certbot-1 certbot certonly --webroot -w /var/www/certbot -d aimcheck.ru -d www.aimcheck.ru
 ```
 
-This will create certificates in:
+After success, the certs should exist inside the shared letsencrypt volume at:
 
 ```text
 /etc/letsencrypt/live/aimcheck.ru/fullchain.pem
 /etc/letsencrypt/live/aimcheck.ru/privkey.pem
 ```
 
-Check auto-renewal:
+## 10. Switch the existing Nginx stack to the final HTTPS config
+
+Replace the temporary config with [deploy/nginx/aimcheck.ru.shared-proxy.conf](/e:/Sites/aimcheck/deploy/nginx/aimcheck.ru.shared-proxy.conf:1):
 
 ```bash
-sudo systemctl status certbot.timer
-sudo certbot renew --dry-run
+cp /opt/aimcheck/deploy/nginx/aimcheck.ru.shared-proxy.conf <existing-nginx-conf-dir>/aimcheck.ru.conf
 ```
 
-## 10. Switch Nginx to the final HTTPS config
-
-Copy the repo config into Nginx:
+Reload Nginx:
 
 ```bash
-sudo cp /opt/aimcheck/deploy/nginx/aimcheck.ru.conf /etc/nginx/sites-available/aimcheck.ru.conf
-sudo nginx -t
-sudo systemctl reload nginx
+docker exec albavita-nginx-1 nginx -t
+docker exec albavita-nginx-1 nginx -s reload
 ```
 
 Verify:
@@ -243,78 +253,74 @@ The first deployment is complete when all of these are true:
 
 - `https://aimcheck.ru` opens the frontend
 - `https://aimcheck.ru/api/health` returns `200`
-- `docker compose ps` shows all containers as running
-- `sudo nginx -t` passes
-- `sudo certbot renew --dry-run` passes
+- `docker compose -f docker-compose.yml -f docker-compose.shared-proxy.yml ps` shows all `aimcheck` containers running
+- `docker exec albavita-nginx-1 nginx -t` passes
+- `docker exec -it albavita-certbot-1 certbot renew --dry-run` passes
 
 ## 12. Updating the app later
 
 Normal update flow:
 
 1. Push changes to `main`.
-2. Wait for GitHub Actions to publish fresh images.
+2. Wait for GitHub Actions to publish new images.
 3. On the VPS run:
 
 ```bash
 cd /opt/aimcheck
 git pull
-docker compose pull
-docker compose up -d
+docker compose -f docker-compose.yml -f docker-compose.shared-proxy.yml pull
+docker compose -f docker-compose.yml -f docker-compose.shared-proxy.yml up -d
 docker image prune -f
 ```
+
+If the Nginx config for `aimcheck.ru` did not change, no proxy reload is needed.
 
 If you deploy by a specific image tag instead of `latest`:
 
 1. Find the published short SHA tag in GHCR.
-2. Edit `.env` and set `IMAGE_TAG=<that-tag>`.
+2. Set `IMAGE_TAG=<that-tag>` in `.env`.
 3. Run:
 
 ```bash
 cd /opt/aimcheck
-docker compose pull
-docker compose up -d
+docker compose -f docker-compose.yml -f docker-compose.shared-proxy.yml pull
+docker compose -f docker-compose.yml -f docker-compose.shared-proxy.yml up -d
 ```
 
 ## 13. Useful commands
 
-Show running containers:
+Show `aimcheck` containers:
 
 ```bash
-docker compose ps
+docker compose -f docker-compose.yml -f docker-compose.shared-proxy.yml ps
 ```
 
 Show backend logs:
 
 ```bash
-docker compose logs -f server
+docker compose -f docker-compose.yml -f docker-compose.shared-proxy.yml logs -f server
 ```
 
 Show frontend logs:
 
 ```bash
-docker compose logs -f client
+docker compose -f docker-compose.yml -f docker-compose.shared-proxy.yml logs -f client
 ```
 
 Show database logs:
 
 ```bash
-docker compose logs -f postgres
+docker compose -f docker-compose.yml -f docker-compose.shared-proxy.yml logs -f postgres
 ```
 
-Restart everything:
+Check the existing proxy config:
 
 ```bash
-docker compose restart
+docker exec albavita-nginx-1 nginx -t
 ```
 
-Check Nginx config:
+Reload the existing proxy:
 
 ```bash
-sudo nginx -t
-```
-
-Reload Nginx:
-
-```bash
-sudo systemctl reload nginx
+docker exec albavita-nginx-1 nginx -s reload
 ```
