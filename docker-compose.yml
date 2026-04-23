@@ -1,49 +1,55 @@
 services:
   postgres:
-    image: postgres:15
-    networks:
-      - aim-trainer
+    image: postgres:16-alpine
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: ${DB_DATABASE}
-      POSTGRES_USER: ${DB_USERNAME}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - '5437:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aimcheck
 
   server:
-    image: 172.16.0.100:8011/aim-trainer-server
-    networks:
-      - aim-trainer
-    ports:
-      - '8062:3000'
-    environment:
-      - PORT
-      - DB_HOST
-      - DB_PORT
-      - DB_USERNAME
-      - DB_PASSWORD
-      - DB_DATABASE
-      - BETTER_AUTH_SECRET
-      - BETTER_AUTH_URL
-      - CLIENT_URL
-      - NODE_ENV
+    image: ghcr.io/${GHCR_NAMESPACE}/aimcheck-server:${IMAGE_TAG:-latest}
+    restart: unless-stopped
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-postgres}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-https://aimcheck.ru}
+      CLIENT_URL: ${CLIENT_URL:-https://aimcheck.ru}
+    ports:
+      - '127.0.0.1:3000:3000'
+    networks:
+      - aimcheck
 
   client:
-    image: 172.16.0.100:8011/aim-trainer-client
-    networks:
-      - aim-trainer
-    ports:
-      - '8061:4173'
-    environment:
-      VITE_API_URL: ${VITE_API_URL}
+    image: ghcr.io/${GHCR_NAMESPACE}/aimcheck-client:${IMAGE_TAG:-latest}
+    restart: unless-stopped
     depends_on:
       - server
+    ports:
+      - '127.0.0.1:8080:80'
+    networks:
+      - aimcheck
 
 volumes:
   postgres_data:
+
 networks:
-  aim-trainer:
+  aimcheck:
