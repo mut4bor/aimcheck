@@ -14,23 +14,31 @@ import {
   SessionSubmitResponse,
   SessionConfig,
 } from '@/types'
-import {
-  generateTargetPosition,
-  checkInCenter,
-} from '@/utils'
+import { generateTargetPosition } from '@/utils'
 
 type UseGameEngineReturn = {
   gameState: GameState
   currentRound: number
   targetPosition: Point
   mousePosition: Point
-  isInCenter: boolean
-  holdProgress: number
   canvasSize: number
   result: SessionSubmitResponse | null
+  startGame: (e?: MouseEvent<HTMLElement>) => void
   handleMouseMove: (e: MouseEvent<HTMLCanvasElement>) => void
   handleMouseClick: (e: MouseEvent<HTMLCanvasElement>) => void
+  handleTargetPainted: (round: number, paintedAt: number) => void
   containerRef: RefObject<HTMLDivElement | null>
+}
+
+const getEventTime = (eventTimeStamp: number): number => {
+  const now = performance.now()
+  const timeOrigin = performance.timeOrigin ?? Date.now() - now
+
+  if (eventTimeStamp > now + 10000) {
+    return eventTimeStamp - timeOrigin
+  }
+
+  return eventTimeStamp
 }
 
 export const useGameEngine = (
@@ -41,19 +49,19 @@ export const useGameEngine = (
   const [currentRound, setCurrentRound] = useState(0)
   const [targetPosition, setTargetPosition] = useState<Point>({ x: 0, y: 0 })
   const [mousePosition, setMousePosition] = useState<Point>({ x: 0, y: 0 })
-  const [isInCenter, setIsInCenter] = useState(false)
   const [canvasSize, setCanvasSize] = useState(400)
-  const [holdProgress, setHoldProgress] = useState(0)
   const [result, setResult] = useState<SessionSubmitResponse | null>(null)
 
   const containerRef = useRef<HTMLDivElement>(null)
+  const mousePositionRef = useRef<Point>({ x: 0, y: 0 })
 
   // raw capture buffers (refs to avoid re-renders per mousemove)
   const trialsRef = useRef<RawTrial[]>([])
   const trajectoryRef = useRef<{ x: number; y: number; t: number }[]>([])
   const betweenRef = useRef<{ x: number; y: number; t: number }[]>([])
   const trialMetaRef = useRef<{
-    appeared_at_ms: number
+    appeared_at_ms: number | null
+    round_number: number
     start_cursor_x: number
     start_cursor_y: number
     target_x: number
@@ -66,6 +74,11 @@ export const useGameEngine = (
     gameStateRef.current = gameState
   }, [gameState])
 
+  const updateMousePosition = useCallback((point: Point) => {
+    mousePositionRef.current = point
+    setMousePosition(point)
+  }, [])
+
   const centerX = canvasSize / 2
   const centerY = canvasSize / 2
   const CIRCLE_RADIUS = (canvasSize - config.targetRadius * 2) / 2 - 20
@@ -73,18 +86,35 @@ export const useGameEngine = (
   useEffect(() => {
     const updateSize = () => {
       if (!containerRef.current) return
-      setCanvasSize(containerRef.current.clientHeight)
+      const { width, height } = containerRef.current.getBoundingClientRect()
+      const size = Math.floor(Math.min(width, height))
+      if (size > 0) {
+        setCanvasSize(size)
+      }
     }
+
     updateSize()
+
+    const observer =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(updateSize)
+        : null
+    if (observer && containerRef.current) {
+      observer.observe(containerRef.current)
+    }
+
     window.addEventListener('resize', updateSize)
-    return () => window.removeEventListener('resize', updateSize)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', updateSize)
+    }
   }, [])
 
   const finishRound = useCallback(
-    (clickX: number, clickY: number) => {
+    (clickX: number, clickY: number, clickedAt: number) => {
       const meta = trialMetaRef.current
-      if (!meta) return
-      const clickedAt = performance.now()
+      if (!meta || meta.appeared_at_ms === null) return
+      updateMousePosition({ x: clickX, y: clickY })
 
       const trial: RawTrial = {
         round_number: trialsRef.current.length + 1,
@@ -110,7 +140,7 @@ export const useGameEngine = (
         setGameState('preparing')
       }
     },
-    [config.roundsCount],
+    [config.roundsCount, updateMousePosition],
   )
 
   const handleMouseMove = useCallback(
@@ -120,8 +150,7 @@ export const useGameEngine = (
       const y = e.clientY - rect.top
       const t = performance.now()
 
-      setMousePosition({ x, y })
-      setIsInCenter(checkInCenter({ x, y }, centerX, centerY, config.centerTolerance))
+      updateMousePosition({ x, y })
 
       const state = gameStateRef.current
       if (state === 'playing') {
@@ -130,17 +159,29 @@ export const useGameEngine = (
         betweenRef.current.push({ x, y, t })
       }
     },
-    [centerX, centerY, config.centerTolerance],
+    [updateMousePosition],
   )
 
   const handleMouseClick = useCallback(
     (e: MouseEvent<HTMLCanvasElement>) => {
       if (gameStateRef.current !== 'playing') return
+      const clickedAt = getEventTime(e.timeStamp)
       const rect = e.currentTarget.getBoundingClientRect()
-      finishRound(e.clientX - rect.left, e.clientY - rect.top)
+      finishRound(e.clientX - rect.left, e.clientY - rect.top, clickedAt)
     },
     [finishRound],
   )
+
+  const handleTargetPainted = useCallback((round: number, paintedAt: number) => {
+    const meta = trialMetaRef.current
+    if (!meta || meta.round_number !== round || meta.appeared_at_ms !== null) {
+      return
+    }
+
+    meta.appeared_at_ms = paintedAt
+    meta.start_cursor_x = mousePositionRef.current.x
+    meta.start_cursor_y = mousePositionRef.current.y
+  }, [])
 
   const startNewRound = useCallback(() => {
     // attach between_samples to previous trial
@@ -151,19 +192,29 @@ export const useGameEngine = (
     betweenRef.current = []
 
     const newTarget = generateTargetPosition(centerX, centerY, CIRCLE_RADIUS)
+    const cursor = mousePositionRef.current
     setTargetPosition(newTarget)
     trialMetaRef.current = {
-      appeared_at_ms: performance.now(),
-      start_cursor_x: mousePosition.x,
-      start_cursor_y: mousePosition.y,
+      appeared_at_ms: null,
+      round_number: trialsRef.current.length,
+      start_cursor_x: cursor.x,
+      start_cursor_y: cursor.y,
       target_x: newTarget.x,
       target_y: newTarget.y,
     }
     trajectoryRef.current = []
     setGameState('playing')
-  }, [centerX, centerY, CIRCLE_RADIUS, mousePosition.x, mousePosition.y])
+  }, [centerX, centerY, CIRCLE_RADIUS])
 
-  const startGame = useCallback(() => {
+  const startGame = useCallback((e?: MouseEvent<HTMLElement>) => {
+    if (e && containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect()
+      updateMousePosition({
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      })
+    }
+
     trialsRef.current = []
     trajectoryRef.current = []
     betweenRef.current = []
@@ -172,37 +223,7 @@ export const useGameEngine = (
     setResult(null)
     setCurrentRound(0)
     setGameState('preparing')
-  }, [])
-
-  // hold cursor in center → begin or restart
-  useEffect(() => {
-    let frame: number
-    let startTime: number | null = null
-
-    function updateProgress(currentTime: number) {
-      if (!startTime) startTime = currentTime
-      const elapsed = currentTime - startTime
-      const progress = Math.min(elapsed / (config.preparationTimeMs / 2), 1)
-      setHoldProgress(progress)
-
-      if (progress < 1 && isInCenter) {
-        frame = requestAnimationFrame(updateProgress)
-      } else if (progress >= 1) {
-        if (gameState === 'waiting' || gameState === 'finished') startGame()
-        setHoldProgress(0)
-      }
-    }
-
-    if (isInCenter && (gameState === 'waiting' || gameState === 'finished')) {
-      frame = requestAnimationFrame(updateProgress)
-    } else {
-      setHoldProgress(0)
-    }
-
-    return () => {
-      if (frame) cancelAnimationFrame(frame)
-    }
-  }, [isInCenter, gameState, startGame, config.preparationTimeMs])
+  }, [updateMousePosition])
 
   // preparing → start new round after delay
   useEffect(() => {
@@ -234,11 +255,11 @@ export const useGameEngine = (
     currentRound,
     targetPosition,
     mousePosition,
-    isInCenter,
-    holdProgress,
     canvasSize,
     result,
+    startGame,
     handleMouseMove,
     handleMouseClick,
+    handleTargetPainted,
   }
 }

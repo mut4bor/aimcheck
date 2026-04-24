@@ -85,6 +85,16 @@ export interface UserSessionSummary {
 
 export interface SessionTrialRow {
   round_number: number
+  appeared_at_ms: number
+  clicked_at_ms: number
+  target_x: number
+  target_y: number
+  start_cursor_x: number
+  start_cursor_y: number
+  click_x: number
+  click_y: number
+  trajectory: TrajectoryPoint[]
+  between_samples: TrajectoryPoint[]
   rt_ms: number
   hit_distance: number
   hit_score: number

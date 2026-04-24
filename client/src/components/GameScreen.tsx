@@ -97,12 +97,13 @@ const GameScreenInner = ({
             targetRadius={config.targetRadius}
             centerTolerance={config.centerTolerance}
             gameState={engine.gameState}
+            currentRound={engine.currentRound}
             targetPosition={engine.targetPosition}
             mousePosition={engine.mousePosition}
-            isInCenter={engine.isInCenter}
-            holdProgress={engine.holdProgress}
             onMouseMove={engine.handleMouseMove}
             onMouseClick={engine.handleMouseClick}
+            onTargetPainted={engine.handleTargetPainted}
+            onStartGame={engine.startGame}
             containerRef={engine.containerRef}
           />
           <div className="flex flex-col max-w-[600px] gap-4 flex-1 min-w-0 min-h-0 overflow-y-auto h-full">

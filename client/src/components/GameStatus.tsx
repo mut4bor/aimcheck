@@ -11,22 +11,22 @@ const GameStatus = ({ gameState, currentRound, roundsCount }: Props) => {
     <div className="rounded-lg bg-white p-4 shadow-lg flex-shrink-0">
       <h3 className="font-semibold mb-2">Состояние</h3>
       {gameState === 'waiting' && (
-        <p className="text-gray-600">
-          Наведите курсор на центральную точку и удерживайте для начала игры
-        </p>
+        <p className="text-gray-600">Нажмите «Начать тест», чтобы запустить игру.</p>
       )}
       {gameState === 'preparing' && (
-        <p className="text-orange-600">Подготовка... держите курсор в центре</p>
+        <p className="text-orange-600">
+          Подготовка... ожидайте следующую цель.
+        </p>
       )}
       {gameState === 'playing' && (
         <p className="text-green-600">
           Раунд {currentRound + 1}/{roundsCount} - ведите курсор к цели и
-          кликните!
+          кликните.
         </p>
       )}
       {gameState === 'finished' && (
         <p className="text-blue-600">
-          Игра завершена! Чтобы сыграть снова, удерживайте курсор в центре
+          Тест завершен. Можно запустить новый тест кнопкой на поле.
         </p>
       )}
     </div>

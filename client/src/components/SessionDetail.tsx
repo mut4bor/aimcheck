@@ -1,9 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '@/config'
 import { useSession } from '@/services/authClient'
-import { SessionDetailResponse } from '@/types'
+import {
+  SessionDetailResponse,
+  SessionTrialRow,
+  TrajectoryPoint,
+} from '@/types'
 
 const fmt = (n: number | string | null, d = 1) =>
   n == null ? '—' : (typeof n === 'number' ? n : Number(n)).toFixed(d)
@@ -162,6 +166,263 @@ const RadarChart = ({
   )
 }
 
+type ReplayPoint = TrajectoryPoint & {
+  x: number
+  y: number
+  t: number
+}
+
+const toReplayPoints = (trial: SessionTrialRow): ReplayPoint[] => {
+  const startT = trial.appeared_at_ms
+  const points: ReplayPoint[] = [
+    {
+      x: trial.start_cursor_x,
+      y: trial.start_cursor_y,
+      t: startT,
+    },
+    ...(trial.trajectory ?? []),
+    {
+      x: trial.click_x,
+      y: trial.click_y,
+      t: trial.clicked_at_ms,
+    },
+  ]
+
+  return points
+    .filter(
+      (p) =>
+        Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.t),
+    )
+    .sort((a, b) => a.t - b.t)
+}
+
+const pointAtProgress = (points: ReplayPoint[], progress: number) => {
+  if (points.length === 0) return { x: 0, y: 0 }
+  if (points.length === 1) return points[0]
+
+  const start = points[0].t
+  const end = points[points.length - 1].t
+  const targetT = start + Math.max(1, end - start) * progress
+
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1]
+    const next = points[i]
+    if (next.t < targetT) continue
+
+    const span = Math.max(1, next.t - prev.t)
+    const ratio = Math.max(0, Math.min(1, (targetT - prev.t) / span))
+    return {
+      x: prev.x + (next.x - prev.x) * ratio,
+      y: prev.y + (next.y - prev.y) * ratio,
+    }
+  }
+
+  return points[points.length - 1]
+}
+
+const AimReplay = ({
+  session,
+  trials,
+}: {
+  session: SessionDetailResponse['session']
+  trials: SessionTrialRow[]
+}) => {
+  const [selectedIndex, setSelectedIndex] = useState(0)
+  const [progress, setProgress] = useState(0)
+
+  const selectedTrial = trials[selectedIndex] ?? trials[0]
+  const selectedPoints = useMemo(
+    () => (selectedTrial ? toReplayPoints(selectedTrial) : []),
+    [selectedTrial],
+  )
+  const allPaths = useMemo(() => trials.map(toReplayPoints), [trials])
+  const cursor = pointAtProgress(selectedPoints, progress)
+  const fieldWidth = Number(session.field_width)
+  const fieldHeight = Number(session.field_height)
+  const targetRadius = Number(session.target_radius)
+  const centerX = fieldWidth / 2
+  const centerY = fieldHeight / 2
+  const guideRadius = Math.max(
+    0,
+    (Math.min(fieldWidth, fieldHeight) - targetRadius * 2) / 2 - 20,
+  )
+  const durationMs = Math.max(
+    700,
+    Math.min(2200, Number(selectedTrial?.rt_ms ?? 900) + 500),
+  )
+
+  useEffect(() => {
+    setProgress(0)
+  }, [selectedIndex])
+
+  useEffect(() => {
+    let frame = 0
+    let startedAt: number | null = null
+
+    const tick = (now: number) => {
+      if (startedAt === null) startedAt = now
+      const elapsed = (now - startedAt) % durationMs
+      setProgress(elapsed / durationMs)
+      frame = requestAnimationFrame(tick)
+    }
+
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [durationMs])
+
+  if (!selectedTrial || fieldWidth <= 0 || fieldHeight <= 0) return null
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <h2 className="text-xl font-semibold">Aim replay</h2>
+        <div className="flex gap-2 flex-wrap">
+          {trials.map((trial, index) => (
+            <button
+              key={trial.round_number}
+              type="button"
+              onClick={() => setSelectedIndex(index)}
+              className={`h-9 min-w-9 rounded border px-3 text-sm font-semibold ${
+                index === selectedIndex
+                  ? 'border-blue-600 bg-blue-600 text-white'
+                  : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              {trial.round_number}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
+        <div className="overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-3">
+          <svg
+            viewBox={`0 0 ${fieldWidth} ${fieldHeight}`}
+            width={fieldWidth}
+            height={fieldHeight}
+            className="block h-auto max-w-full"
+            role="img"
+            aria-label="Animated aiming path replay"
+          >
+            <rect width={fieldWidth} height={fieldHeight} fill="#ffffff" />
+            <circle
+              cx={centerX}
+              cy={centerY}
+              r={guideRadius}
+              fill="none"
+              stroke="#111827"
+              strokeWidth={2}
+            />
+            <circle
+              cx={centerX}
+              cy={centerY}
+              r={targetRadius}
+              fill="none"
+              stroke="#9ca3af"
+              strokeWidth={1}
+            />
+            {allPaths.map((points, index) =>
+              points.length > 1 ? (
+                <polyline
+                  key={trials[index].round_number}
+                  points={points.map((p) => `${p.x},${p.y}`).join(' ')}
+                  fill="none"
+                  stroke={index === selectedIndex ? '#2563eb' : '#94a3b8'}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={index === selectedIndex ? 4 : 2}
+                  opacity={index === selectedIndex ? 0.9 : 0.28}
+                />
+              ) : null,
+            )}
+            <line
+              x1={centerX}
+              y1={centerY}
+              x2={selectedTrial.target_x}
+              y2={selectedTrial.target_y}
+              stroke="#cbd5e1"
+              strokeWidth={1}
+              strokeDasharray="6 6"
+            />
+            <circle
+              cx={selectedTrial.target_x}
+              cy={selectedTrial.target_y}
+              r={targetRadius}
+              fill="#ef4444"
+              stroke="#111827"
+              strokeWidth={2}
+            />
+            <circle
+              cx={selectedTrial.click_x}
+              cy={selectedTrial.click_y}
+              r={Math.max(4, targetRadius * 0.3)}
+              fill="none"
+              stroke="#f59e0b"
+              strokeWidth={3}
+            />
+            <circle
+              cx={selectedTrial.start_cursor_x}
+              cy={selectedTrial.start_cursor_y}
+              r={Math.max(4, targetRadius * 0.25)}
+              fill="#10b981"
+            />
+            <circle
+              cx={cursor.x}
+              cy={cursor.y}
+              r={Math.max(5, targetRadius * 0.32)}
+              fill="#2563eb"
+              stroke="#eff6ff"
+              strokeWidth={3}
+            />
+          </svg>
+        </div>
+
+        <div className="rounded-lg border border-gray-200 p-4 text-sm">
+          <div className="font-semibold text-gray-900">
+            Round {selectedTrial.round_number}
+          </div>
+          <dl className="mt-3 grid grid-cols-2 gap-2">
+            <dt className="text-gray-500">RT</dt>
+            <dd className="text-right font-semibold">
+              {fmt(selectedTrial.rt_ms, 0)} ms
+            </dd>
+            <dt className="text-gray-500">Miss</dt>
+            <dd className="text-right font-semibold">
+              {fmt(selectedTrial.hit_distance)} px
+            </dd>
+            <dt className="text-gray-500">Path delta</dt>
+            <dd className="text-right font-semibold">
+              {fmt(selectedTrial.movement_delta_pct)}%
+            </dd>
+            <dt className="text-gray-500">Loops</dt>
+            <dd className="text-right font-semibold">
+              {selectedTrial.loops_count}
+            </dd>
+            <dt className="text-gray-500">Samples</dt>
+            <dd className="text-right font-semibold">
+              {Math.max(0, selectedPoints.length - 2)}
+            </dd>
+          </dl>
+          <div className="mt-4 flex flex-col gap-2 text-xs text-gray-600">
+            <div className="flex items-center gap-2">
+              <span className="h-3 w-3 rounded-full bg-emerald-500" />
+              Start cursor
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="h-3 w-3 rounded-full bg-red-500" />
+              Target
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="h-3 w-3 rounded-full border-2 border-amber-500" />
+              Click
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 const SessionDetail = () => {
   const { id } = useParams<{ id: string }>()
   const { data: session, isPending } = useSession()
@@ -238,6 +499,8 @@ const SessionDetail = () => {
             </table>
           </div>
         </div>
+
+        <AimReplay session={s} trials={trials} />
 
         <h2 className="text-xl font-semibold">Статистика по попыткам</h2>
         <div className="overflow-x-auto">

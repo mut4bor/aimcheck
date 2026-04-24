@@ -1,18 +1,18 @@
 import { useRef, useEffect, MouseEvent, RefObject } from 'react'
 import { Point, GameState } from '@/types'
-import { UI_CONFIG } from '@/constants'
 
 interface Props {
   canvasSize: number
   targetRadius: number
   centerTolerance: number
   gameState: GameState
+  currentRound: number
   targetPosition: Point
   mousePosition: Point
-  isInCenter: boolean
-  holdProgress?: number
   onMouseMove: (e: MouseEvent<HTMLCanvasElement>) => void
   onMouseClick: (e: MouseEvent<HTMLCanvasElement>) => void
+  onTargetPainted: (round: number, paintedAt: number) => void
+  onStartGame: (e?: MouseEvent<HTMLElement>) => void
   containerRef: RefObject<HTMLDivElement | null>
 }
 
@@ -21,18 +21,20 @@ const GameCanvas = ({
   targetRadius,
   centerTolerance,
   gameState,
+  currentRound,
   targetPosition,
   mousePosition,
-  isInCenter,
-  holdProgress = 0,
   onMouseMove,
   onMouseClick,
+  onTargetPainted,
+  onStartGame,
   containerRef,
 }: Props) => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const CIRCLE_RADIUS = (canvasSize - targetRadius * 2) / 2 - 20
   const centerX = canvasSize / 2
   const centerY = canvasSize / 2
+  const showStartOverlay = gameState === 'waiting' || gameState === 'finished'
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -50,33 +52,16 @@ const GameCanvas = ({
 
     ctx.beginPath()
     ctx.arc(centerX, centerY, centerTolerance, 0, 2 * Math.PI)
-    ctx.strokeStyle = isInCenter ? '#00ff00' : '#ff0000'
+    ctx.strokeStyle = '#9ca3af'
     ctx.lineWidth = 1
     ctx.stroke()
-
-    if (
-      (gameState === 'waiting' || gameState === 'finished') &&
-      holdProgress > 0
-    ) {
-      ctx.beginPath()
-      ctx.arc(
-        centerX,
-        centerY,
-        centerTolerance - 2,
-        -Math.PI / 2,
-        -Math.PI / 2 + 2 * Math.PI * holdProgress,
-      )
-      ctx.strokeStyle = 'rgba(0,150,255,0.7)'
-      ctx.lineWidth = 4
-      ctx.stroke()
-    }
 
     if (gameState === 'playing') {
       ctx.beginPath()
       ctx.arc(
         targetPosition.x,
         targetPosition.y,
-        UI_CONFIG.TARGET_SIZE,
+        targetRadius,
         0,
         2 * Math.PI,
       )
@@ -104,29 +89,58 @@ const GameCanvas = ({
     gameState,
     targetPosition,
     mousePosition,
-    isInCenter,
     canvasSize,
     CIRCLE_RADIUS,
-    holdProgress,
     centerX,
     centerY,
     centerTolerance,
   ])
 
+  useEffect(() => {
+    if (gameState !== 'playing') return
+
+    const frame = requestAnimationFrame((paintedAt) => {
+      onTargetPainted(currentRound, paintedAt)
+    })
+
+    return () => cancelAnimationFrame(frame)
+  }, [
+    currentRound,
+    gameState,
+    onTargetPainted,
+    targetPosition.x,
+    targetPosition.y,
+  ])
+
   return (
     <div
-      className="flex items-center justify-center flex-shrink-0 h-full aspect-square bg-white rounded-lg shadow-lg"
+      className="relative flex items-center justify-center flex-shrink-0 h-full aspect-square bg-white rounded-lg shadow-lg overflow-hidden"
       ref={containerRef}
     >
       <canvas
         ref={canvasRef}
         width={canvasSize}
         height={canvasSize}
-        className="cursor-crosshair"
+        className={`cursor-crosshair transition duration-200 ${
+          showStartOverlay ? 'blur-sm' : ''
+        }`}
         style={{ width: `${canvasSize}px`, height: `${canvasSize}px` }}
         onMouseMove={onMouseMove}
         onClick={onMouseClick}
       />
+      {showStartOverlay && (
+        <div className="absolute inset-0 flex items-center justify-center bg-white/25">
+          <div className="rounded-lg border border-gray-200 bg-white/95 p-6 shadow-xl">
+            <button
+              type="button"
+              className="rounded bg-blue-600 px-6 py-3 text-base font-semibold text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              onClick={onStartGame}
+            >
+              Начать тест
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
