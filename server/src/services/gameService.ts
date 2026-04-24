@@ -131,7 +131,10 @@ export class GameService {
       if (sessRes.rows.length === 0) return null
 
       const trialsRes = await client.query(
-        `SELECT round_number, rt_ms, hit_distance, hit_score,
+        `SELECT round_number, appeared_at_ms, clicked_at_ms,
+                target_x, target_y, start_cursor_x, start_cursor_y,
+                click_x, click_y, trajectory, between_samples,
+                rt_ms, hit_distance, hit_score,
                 movement_delta_pct, movement_score,
                 overshoots, undershoots, parasitic_score,
                 positioning_rho_pct, positioning_score,

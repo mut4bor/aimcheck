@@ -10,73 +10,76 @@ import { SCORING_CONFIG, WEIGHT_SUM } from '../config/scoring.js'
 const dist = (ax: number, ay: number, bx: number, by: number): number =>
   Math.hypot(ax - bx, ay - by)
 
+type ThresholdScoreEntry = {
+  max: number
+  score: number
+  inclusive?: boolean
+}
+
+type ExactScoreEntry = {
+  value: number
+  score: number
+}
+
+function thresholdScore(
+  value: number,
+  table: readonly ThresholdScoreEntry[],
+): number {
+  const entry = table.find((item) =>
+    item.inclusive ? value <= item.max : value < item.max,
+  )
+  return entry?.score ?? SCORING_CONFIG.SCORE_TABLES.defaultScore
+}
+
+function exactScore(value: number, table: readonly ExactScoreEntry[]): number {
+  return (
+    table.find((item) => item.value === value)?.score ??
+    SCORING_CONFIG.SCORE_TABLES.defaultScore
+  )
+}
+
 function reactionScore(rtMs: number): number {
-  if (rtMs < 300) return 100
-  if (rtMs < 400) return 80
-  if (rtMs < 500) return 60
-  if (rtMs <= 550) return 50
-  return 0
+  return thresholdScore(rtMs, SCORING_CONFIG.SCORE_TABLES.reaction)
 }
 
 function hitScore(d: number, R: number): number {
-  if (d <= 0.2 * R) return 100
-  if (d <= 0.5 * R) return 85
-  if (d <= R) return 50
-  return 0
+  return thresholdScore(d / R, SCORING_CONFIG.SCORE_TABLES.hit)
 }
 
 function movementScore(deltaPct: number): number {
-  if (deltaPct <= 5) return 100
-  if (deltaPct <= 10) return 90
-  if (deltaPct <= 15) return 80
-  if (deltaPct <= 19) return 60
-  if (deltaPct <= 25) return 50
-  if (deltaPct <= 30) return 40
-  if (deltaPct <= 40) return 30
-  return 0
+  return thresholdScore(deltaPct, SCORING_CONFIG.SCORE_TABLES.movement)
 }
 
 function parasiticScore(k: number): number {
-  if (k === 0) return 100
-  if (k === 1) return 70
-  if (k === 2) return 40
-  return 0
+  return exactScore(k, SCORING_CONFIG.SCORE_TABLES.parasitic)
 }
 
 function positioningScore(rhoPct: number): number {
-  if (rhoPct <= 5) return 100
-  if (rhoPct <= 10) return 85
-  if (rhoPct <= 20) return 70
-  if (rhoPct <= 35) return 50
-  return 0
+  return thresholdScore(rhoPct, SCORING_CONFIG.SCORE_TABLES.positioning)
 }
 
 function stabilityScore(loops: number): number {
-  if (loops === 0) return 100
-  if (loops === 1) return 75
-  if (loops === 2) return 50
-  if (loops === 3) return 25
-  return 0
+  return exactScore(loops, SCORING_CONFIG.SCORE_TABLES.stability)
 }
 
-function computeMPD(
+function computeMaxDeviation(
   trajectory: TrajectoryPoint[],
   x0: number,
   y0: number,
   xm: number,
   ym: number,
-): { mpd: number; sLen: number } {
+): { maxDeviation: number; sLen: number } {
   const sx = xm - x0
   const sy = ym - y0
   const sLen = Math.hypot(sx, sy)
-  if (sLen === 0 || trajectory.length === 0) return { mpd: 0, sLen }
+  if (sLen === 0 || trajectory.length === 0) return { maxDeviation: 0, sLen }
 
-  let sum = 0
+  let maxDeviation = 0
   for (const p of trajectory) {
     const num = Math.abs((p.x - x0) * sy - (p.y - y0) * sx)
-    sum += num / sLen
+    maxDeviation = Math.max(maxDeviation, num / sLen)
   }
-  return { mpd: sum / trajectory.length, sLen }
+  return { maxDeviation, sLen }
 }
 
 function countOvershoots(
@@ -162,7 +165,44 @@ function segmentsIntersect(
   return s1 !== s2 && s3 !== s4
 }
 
-function countLoops(trajectory: TrajectoryPoint[]): number {
+function countClosedReturnLoops(
+  trajectory: TrajectoryPoint[],
+  closureRadius: number,
+  minPathLength: number,
+): number {
+  if (trajectory.length < 3) return 0
+
+  const pathLengths = [0]
+  for (let i = 1; i < trajectory.length; i++) {
+    pathLengths[i] =
+      pathLengths[i - 1] +
+      dist(trajectory[i - 1].x, trajectory[i - 1].y, trajectory[i].x, trajectory[i].y)
+  }
+
+  let loops = 0
+  let lastLoopEndIdx = -1
+  for (let i = 0; i < trajectory.length; i++) {
+    if (i <= lastLoopEndIdx) continue
+
+    for (let j = i + 2; j < trajectory.length; j++) {
+      const pathLength = pathLengths[j] - pathLengths[i]
+      if (pathLength < minPathLength) continue
+
+      if (
+        dist(trajectory[i].x, trajectory[i].y, trajectory[j].x, trajectory[j].y) <=
+        closureRadius
+      ) {
+        loops++
+        lastLoopEndIdx = j
+        break
+      }
+    }
+  }
+
+  return loops
+}
+
+function countLoops(trajectory: TrajectoryPoint[], targetRadius: number): number {
   const minLen = SCORING_CONFIG.MIN_SEGMENT_LENGTH
   const segs: [TrajectoryPoint, TrajectoryPoint][] = []
   for (let i = 0; i < trajectory.length - 1; i++) {
@@ -178,7 +218,14 @@ function countLoops(trajectory: TrajectoryPoint[]): number {
       }
     }
   }
-  return loops
+
+  const closedReturnLoops = countClosedReturnLoops(
+    trajectory,
+    targetRadius * SCORING_CONFIG.LOOP_CLOSURE_RADIUS_RATIO,
+    targetRadius * SCORING_CONFIG.LOOP_MIN_PATH_LENGTH_RATIO,
+  )
+
+  return loops + closedReturnLoops
 }
 
 function positioningRho(
@@ -203,28 +250,33 @@ export function scoreTrial(
   const rt = trial.clicked_at_ms - trial.appeared_at_ms
   const hitD = dist(trial.click_x, trial.click_y, trial.target_x, trial.target_y)
 
-  const { mpd, sLen } = computeMPD(
-    trial.trajectory,
+  const trajectoryWithClick = [
+    ...trial.trajectory,
+    { x: trial.click_x, y: trial.click_y, t: trial.clicked_at_ms },
+  ]
+
+  const { maxDeviation, sLen } = computeMaxDeviation(
+    trajectoryWithClick,
     trial.start_cursor_x,
     trial.start_cursor_y,
     trial.target_x,
     trial.target_y,
   )
-  const delta = sLen > 0 ? (mpd / sLen) * 100 : 0
+  const delta = sLen > 0 ? (maxDeviation / sLen) * 100 : 0
 
   const over = countOvershoots(
-    trial.trajectory,
+    trajectoryWithClick,
     trial.target_x,
     trial.target_y,
     targetRadius,
   )
   const under = countUndershoots(
-    trial.trajectory,
+    trajectoryWithClick,
     trial.target_x,
     trial.target_y,
     targetRadius,
   )
-  const loops = countLoops(trial.trajectory)
+  const loops = countLoops(trajectoryWithClick, targetRadius)
 
   const rho = positioningRho(
     trial.between_samples,
