@@ -66,6 +66,7 @@ export const useGameEngine = (
     start_cursor_y: number
     target_x: number
     target_y: number
+    between_samples: { x: number; y: number; t: number }[]
   } | null>(null)
   const gameStateRef = useRef<GameState>('waiting')
   const submittedRef = useRef(false)
@@ -127,7 +128,7 @@ export const useGameEngine = (
         click_x: clickX,
         click_y: clickY,
         trajectory: trajectoryRef.current,
-        between_samples: [],
+        between_samples: meta.between_samples,
       }
       trialsRef.current.push(trial)
       trajectoryRef.current = []
@@ -155,7 +156,7 @@ export const useGameEngine = (
       const state = gameStateRef.current
       if (state === 'playing') {
         trajectoryRef.current.push({ x, y, t })
-      } else if (state === 'preparing' && trialsRef.current.length > 0) {
+      } else if (state === 'preparing') {
         betweenRef.current.push({ x, y, t })
       }
     },
@@ -184,11 +185,7 @@ export const useGameEngine = (
   }, [])
 
   const startNewRound = useCallback(() => {
-    // attach between_samples to previous trial
-    if (trialsRef.current.length > 0) {
-      trialsRef.current[trialsRef.current.length - 1].between_samples =
-        betweenRef.current
-    }
+    const betweenSamples = betweenRef.current
     betweenRef.current = []
 
     const newTarget = generateTargetPosition(centerX, centerY, CIRCLE_RADIUS)
@@ -201,6 +198,7 @@ export const useGameEngine = (
       start_cursor_y: cursor.y,
       target_x: newTarget.x,
       target_y: newTarget.y,
+      between_samples: betweenSamples,
     }
     trajectoryRef.current = []
     setGameState('playing')
