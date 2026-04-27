@@ -13,7 +13,6 @@ const dist = (ax: number, ay: number, bx: number, by: number): number =>
 type ThresholdScoreEntry = {
   max: number
   score: number
-  inclusive?: boolean
 }
 
 type ExactScoreEntry = {
@@ -25,17 +24,21 @@ function thresholdScore(
   value: number,
   table: readonly ThresholdScoreEntry[],
 ): number {
-  const entry = table.find((item) =>
-    item.inclusive ? value <= item.max : value < item.max,
-  )
+  const entry = table.find((item) => value <= item.max)
   return entry?.score ?? SCORING_CONFIG.SCORE_TABLES.defaultScore
 }
 
-function exactScore(value: number, table: readonly ExactScoreEntry[]): number {
-  return (
-    table.find((item) => item.value === value)?.score ??
-    SCORING_CONFIG.SCORE_TABLES.defaultScore
-  )
+function cappedExactScore(
+  value: number,
+  table: readonly ExactScoreEntry[],
+): number {
+  const exact = table.find((item) => item.value === value)
+  if (exact) return exact.score
+
+  const last = table[table.length - 1]
+  if (last && value > last.value) return last.score
+
+  return SCORING_CONFIG.SCORE_TABLES.defaultScore
 }
 
 function reactionScore(rtMs: number): number {
@@ -51,7 +54,7 @@ function movementScore(deltaPct: number): number {
 }
 
 function parasiticScore(k: number): number {
-  return exactScore(k, SCORING_CONFIG.SCORE_TABLES.parasitic)
+  return cappedExactScore(k, SCORING_CONFIG.SCORE_TABLES.parasitic)
 }
 
 function positioningScore(rhoPct: number): number {
@@ -59,27 +62,66 @@ function positioningScore(rhoPct: number): number {
 }
 
 function stabilityScore(loops: number): number {
-  return exactScore(loops, SCORING_CONFIG.SCORE_TABLES.stability)
+  return cappedExactScore(loops, SCORING_CONFIG.SCORE_TABLES.stability)
 }
 
-function computeMaxDeviation(
+function pathLength(points: TrajectoryPoint[]): number {
+  let length = 0
+  for (let i = 1; i < points.length; i++) {
+    length += dist(points[i - 1].x, points[i - 1].y, points[i].x, points[i].y)
+  }
+  return length
+}
+
+function distanceToSegment(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): number {
+  const vx = bx - ax
+  const vy = by - ay
+  const lenSq = vx * vx + vy * vy
+  if (lenSq === 0) return dist(px, py, ax, ay)
+
+  const t = Math.max(0, Math.min(1, ((px - ax) * vx + (py - ay) * vy) / lenSq))
+  return dist(px, py, ax + vx * t, ay + vy * t)
+}
+
+function computeTrajectoryDifference(
   trajectory: TrajectoryPoint[],
-  x0: number,
-  y0: number,
+  idealStartX: number,
+  idealStartY: number,
   xm: number,
   ym: number,
-): { maxDeviation: number; sLen: number } {
-  const sx = xm - x0
-  const sy = ym - y0
-  const sLen = Math.hypot(sx, sy)
-  if (sLen === 0 || trajectory.length === 0) return { maxDeviation: 0, sLen }
+): number {
+  const idealLength = dist(idealStartX, idealStartY, xm, ym)
+  if (idealLength === 0 || trajectory.length === 0) return 0
 
-  let maxDeviation = 0
+  const actualLength = pathLength(trajectory)
+  const pathExcessPct = Math.max(
+    0,
+    ((actualLength - idealLength) / idealLength) * 100,
+  )
+
+  let deviationSum = 0
   for (const p of trajectory) {
-    const num = Math.abs((p.x - x0) * sy - (p.y - y0) * sx)
-    maxDeviation = Math.max(maxDeviation, num / sLen)
+    deviationSum += distanceToSegment(
+      p.x,
+      p.y,
+      idealStartX,
+      idealStartY,
+      xm,
+      ym,
+    )
   }
-  return { maxDeviation, sLen }
+
+  const meanDeviationPct =
+    ((deviationSum / trajectory.length) / idealLength) * 100
+
+  return pathExcessPct + meanDeviationPct * 2
 }
 
 function countOvershoots(
@@ -89,20 +131,17 @@ function countOvershoots(
   R: number,
 ): number {
   if (trajectory.length < 2) return 0
-  let minIdx = 0
-  let minD = dist(trajectory[0].x, trajectory[0].y, xm, ym)
+
+  let count = 0
+  let wasInside = dist(trajectory[0].x, trajectory[0].y, xm, ym) <= R
+
   for (let i = 1; i < trajectory.length; i++) {
-    const d = dist(trajectory[i].x, trajectory[i].y, xm, ym)
-    if (d < minD) {
-      minD = d
-      minIdx = i
-    }
+    const isInside = dist(trajectory[i].x, trajectory[i].y, xm, ym) <= R
+    if (wasInside && !isInside) count++
+    wasInside = isInside
   }
-  if (minD >= R) return 0
-  for (let j = minIdx + 1; j < trajectory.length; j++) {
-    if (dist(trajectory[j].x, trajectory[j].y, xm, ym) > R) return 1
-  }
-  return 0
+
+  return count
 }
 
 function countUndershoots(
@@ -143,6 +182,13 @@ function countUndershoots(
       }
     }
   }
+
+  if (pauseStart !== null) {
+    const last = trajectory[trajectory.length - 1]
+    const duration = last.t - pauseStart
+    if (duration >= pauseMs && pauseOutside) count++
+  }
+
   return count
 }
 
@@ -251,18 +297,22 @@ export function scoreTrial(
   const hitD = dist(trial.click_x, trial.click_y, trial.target_x, trial.target_y)
 
   const trajectoryWithClick = [
+    {
+      x: trial.start_cursor_x,
+      y: trial.start_cursor_y,
+      t: trial.appeared_at_ms,
+    },
     ...trial.trajectory,
     { x: trial.click_x, y: trial.click_y, t: trial.clicked_at_ms },
   ]
 
-  const { maxDeviation, sLen } = computeMaxDeviation(
+  const delta = computeTrajectoryDifference(
     trajectoryWithClick,
-    trial.start_cursor_x,
-    trial.start_cursor_y,
+    fieldCenterX,
+    fieldCenterY,
     trial.target_x,
     trial.target_y,
   )
-  const delta = sLen > 0 ? (maxDeviation / sLen) * 100 : 0
 
   const over = countOvershoots(
     trajectoryWithClick,
@@ -314,8 +364,7 @@ export function scoreSession(
   const avg = (xs: number[]): number =>
     xs.length === 0 ? 0 : xs.reduce((a, b) => a + b, 0) / xs.length
 
-  const avgRT = avg(trials.map((t) => t.rt_ms))
-  const reactionAgg = reactionScore(avgRT)
+  const reactionAgg = avg(trials.map((t) => reactionScore(t.rt_ms)))
 
   const hitAgg = avg(trials.map((t) => t.hit_score))
   const movementAgg = avg(trials.map((t) => t.movement_score))
@@ -325,17 +374,20 @@ export function scoreSession(
   const positioningValues = trials
     .map((t) => t.positioning_score)
     .filter((v): v is number => v !== null)
+  const hasPositioning = positioningValues.length > 0
   const positioningAgg = avg(positioningValues)
 
   const w = SCORING_CONFIG.WEIGHTS
+  const activeWeightSum =
+    WEIGHT_SUM - (hasPositioning ? 0 : w.positioning)
   const integral =
     (w.hit * hitAgg +
-      w.positioning * positioningAgg +
+      (hasPositioning ? w.positioning * positioningAgg : 0) +
       w.reaction * reactionAgg +
       w.movement * movementAgg +
       w.parasitic * parasiticAgg +
       w.stability * stabilityAgg) /
-    WEIGHT_SUM
+    activeWeightSum
 
   return {
     session: {

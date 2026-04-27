@@ -66,14 +66,13 @@ export async function runMigrations() {
       )
     `)
 
-    // drop legacy game tables
+    // Drop obsolete legacy tables only. Current game history lives in
+    // game_sessions/trials and must survive every backend restart.
     await client.query(`DROP TABLE IF EXISTS rounds CASCADE`)
     await client.query(`DROP TABLE IF EXISTS game_results CASCADE`)
-    await client.query(`DROP TABLE IF EXISTS trials CASCADE`)
-    await client.query(`DROP TABLE IF EXISTS game_sessions CASCADE`)
 
     await client.query(`
-      CREATE TABLE game_sessions (
+      CREATE TABLE IF NOT EXISTS game_sessions (
         id SERIAL PRIMARY KEY,
         user_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -92,7 +91,7 @@ export async function runMigrations() {
     `)
 
     await client.query(`
-      CREATE TABLE trials (
+      CREATE TABLE IF NOT EXISTS trials (
         id SERIAL PRIMARY KEY,
         session_id INTEGER NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
         round_number INTEGER NOT NULL,
@@ -122,10 +121,10 @@ export async function runMigrations() {
     `)
 
     await client.query(
-      `CREATE INDEX idx_trials_session ON trials(session_id, round_number)`,
+      `CREATE INDEX IF NOT EXISTS idx_trials_session ON trials(session_id, round_number)`,
     )
     await client.query(
-      `CREATE INDEX idx_sessions_user ON game_sessions(user_id, created_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_sessions_user ON game_sessions(user_id, created_at DESC)`,
     )
 
     await client.query('COMMIT')
