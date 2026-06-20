@@ -69,9 +69,9 @@ const GameScreenInner = ({
   return (
     <div className="bg-gray-100 flex flex-col items-center p-4 max-h-screen h-full">
       <div className="rounded-lg w-full mx-auto flex flex-col gap-4 flex-1 max-h-screen h-full">
-        <div className="bg-white p-4 rounded-lg shadow-lg w-full flex-shrink-0 grid grid-cols-[1fr_auto] items-center relative gap-4">
-          {/* <div className="bg-white p-4 rounded-lg shadow-lg w-full flex-shrink-0 grid grid-cols-[155px_1fr_auto] items-center relative gap-4"> */}
-          {/* <img className="w-[155px] object-contain" src={Logo} alt="Логотип" /> */}
+        {/* <div className="bg-white p-4 rounded-lg shadow-lg w-full flex-shrink-0 grid grid-cols-[1fr_auto] items-center relative gap-4"> */}
+        <div className="bg-white p-4 rounded-lg shadow-lg w-full flex-shrink-0 grid grid-cols-[155px_1fr_auto] items-center relative gap-4">
+          <img className="w-[155px] object-contain" src={Logo} alt="Логотип" />
           <h1 className="text-3xl font-bold text-center">
             Оценка техники наведения курсора на цель
           </h1>
@@ -123,13 +123,13 @@ const GameScreenInner = ({
           </div>
         </div>
 
-        {/* <div className="w-full flex-shrink-0 h-[100px] flex items-center">
+        <div className="w-full flex-shrink-0 h-[100px] flex items-center">
           <img className="h-full" src={esportsFederationLogo} alt="" />
           <p className="flex flex-col">
             <span>Сайт разработан при поддержке</span>
             <span>Федерации компьютерного спорта России</span>
           </p>
-        </div> */}
+        </div>
       </div>
     </div>
   )
